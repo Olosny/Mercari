@@ -34,25 +34,39 @@ cats = ['first_cat', 'second_cat', 'third_cat']
 for i in range(3):
     df_merc[cats[i]] = df_cats.str.get(i)
 
-df_merc.drop(columns = ['category_name', 'name', 'item_description'], inplace = True)
+#df_merc.drop(columns = ['category_name', 'name', 'item_description'], inplace = True)
+df_merc.drop(columns = ['category_name'], inplace = True)
 
 # Hard clean
 df_merc.dropna(axis=0, how='any', inplace=True)
 
+# Item Description
+fake_chars = '!@#$,\'".?'
+replacement_dic = {ord(c): None for c in fake_chars}
+counts = Counter([ i.translate(replacement_dic) for i in ' '.join(list(df_merc.item_description)).lower().split()
+    if i not in stop and i not in fake_chars])
+
+word_dict = {}
+for k, v in counts.items():
+    if v > 1000:
+        word_dict.update({k : v})
+
+word_count = pd.DataFrame.from_dict(word_dict, orient ='index')
+
 # Mapping Cat to their EV
-ev_and_count_by_brand = df_merc.groupby('brand_name').price.aggregate(['size', 'mean'])
-ev_and_count_by_fcat = df_merc.groupby('first_cat').price.aggregate(['size', 'mean'])
-ev_and_count_by_scat = df_merc.groupby('second_cat').price.aggregate(['size', 'mean'])
-ev_and_count_by_tcat = df_merc.groupby('third_cat').price.aggregate(['size', 'mean'])
-ev_price = df_merc.price.mean()
-brand_cortable = ev_and_count_by_brand.apply(calculate_cat, axis = 1)
-fcat_cortable = ev_and_count_by_fcat.apply(calculate_cat, axis = 1)
-scat_cortable = ev_and_count_by_scat.apply(calculate_cat, axis = 1)
-tcat_cortable = ev_and_count_by_tcat.apply(calculate_cat, axis = 1)
-df_merc.brand_name.replace(brand_cortable, inplace = True)
-df_merc.first_cat.replace(fcat_cortable, inplace = True)
-df_merc.second_cat.replace(scat_cortable, inplace = True)
-df_merc.third_cat.replace(tcat_cortable, inplace = True)
+#ev_and_count_by_brand = df_merc.groupby('brand_name').price.aggregate(['size', 'mean'])
+#ev_and_count_by_fcat = df_merc.groupby('first_cat').price.aggregate(['size', 'mean'])
+#ev_and_count_by_scat = df_merc.groupby('second_cat').price.aggregate(['size', 'mean'])
+#ev_and_count_by_tcat = df_merc.groupby('third_cat').price.aggregate(['size', 'mean'])
+#ev_price = df_merc.price.mean()
+#brand_cortable = ev_and_count_by_brand.apply(calculate_cat, axis = 1)
+#fcat_cortable = ev_and_count_by_fcat.apply(calculate_cat, axis = 1)
+#scat_cortable = ev_and_count_by_scat.apply(calculate_cat, axis = 1)
+#tcat_cortable = ev_and_count_by_tcat.apply(calculate_cat, axis = 1)
+#df_merc.brand_name.replace(brand_cortable, inplace = True)
+#df_merc.first_cat.replace(fcat_cortable, inplace = True)
+#df_merc.second_cat.replace(scat_cortable, inplace = True)
+#df_merc.third_cat.replace(tcat_cortable, inplace = True)
 
 # first regression
 #estimator = RandomForestRegressor(random_state=0, n_estimators=20, n_jobs=-1, verbose=1)
