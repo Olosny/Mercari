@@ -8,6 +8,9 @@ from sklearn.model_selection import cross_val_score
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.ensemble import ExtraTreesRegressor
 from sklearn.linear_model import Ridge
+from nltk.corpus import stopwords
+from collections import Counter
+import re
 
 # Functions
 
@@ -41,17 +44,34 @@ df_merc.drop(columns = ['category_name'], inplace = True)
 df_merc.dropna(axis=0, how='any', inplace=True)
 
 # Item Description
-fake_chars = '!@#$,\'".?'
-replacement_dic = {ord(c): None for c in fake_chars}
-counts = Counter([ i.translate(replacement_dic) for i in ' '.join(list(df_merc.item_description)).lower().split()
-    if i not in stop and i not in fake_chars])
+stop = set(stopwords.words('english'))
+stop.add('i\'d')
+stop.add('i\'m')
+stop.add('i\'ll')
+stop.add('yes')
+stop.add('no')
+stop.add(';)')
+stop.add('***')
+stop.add('**')
+stop.add(':)')
+stop.add('(:')
+stop.add('(;')
+stop.add(':-)')
+stop.add('//')
+fake_chars_regex = '(^[(-])|([-:,!.?)"]*$)'
+#replacement_dic = {ord(c): None for c in fake_chars}
+counts = Counter([ re.sub(fake_chars_regex, '', i) for i in ' '.join(list(df_merc.item_description)).lower().split()
+    if i not in stop and len(i) > 1 ])
+#counts = Counter([ i.translate(replacement_dic) for i in ' '.join(list(df_merc.item_description)).lower().split()
+#    if i not in stop and i not in fake_chars])
 
 word_dict = {}
 for k, v in counts.items():
-    if v > 1000:
+    if v > 5000:
         word_dict.update({k : v})
 
 word_count = pd.DataFrame.from_dict(word_dict, orient ='index')
+word_count.drop(index = '', inplace = True)
 
 # Mapping Cat to their EV
 #ev_and_count_by_brand = df_merc.groupby('brand_name').price.aggregate(['size', 'mean'])
