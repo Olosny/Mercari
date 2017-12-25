@@ -8,7 +8,7 @@ from sklearn.model_selection import cross_val_score
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.ensemble import ExtraTreesRegressor
 from sklearn.linear_model import Ridge
-
+from sklearn.linear_model import Lasso
 # Read and clean
 df_merc = pd.read_table('./train.tsv', index_col = 0)
 df_merc.drop(df_merc[df_merc.price == 0].index, inplace = True)
@@ -25,7 +25,9 @@ df_merc.dropna(axis=0, how='any', inplace=True)
 
 # Group low frequent brand_name
 brand_counts = df_merc['brand_name'].value_counts().to_frame()
-df_merc['brand_name'][df_merc['brand_name'].isin(brand_counts[brand_counts['brand_name']<10].index)] = 'Rare_brands'
+df_merc['brand_name'][df_merc['brand_name'].isin(brand_counts[brand_counts['brand_name']<1000].index)] = 'Rare_brands'
+cat_counts = df_merc['third_cat'].value_counts().to_frame()
+df_merc['third_cat'][df_merc['third_cat'].isin(cat_counts[cat_counts['third_cat']<1000].index)] = 'Rare_cat'
 
 # categorical to numeric
 df_merc_cat = df_merc
@@ -39,7 +41,7 @@ df_dummies = pd.get_dummies(df_merc, columns=['brand_name','first_cat','second_c
 
 
 # first regression
-estimator = RandomForestRegressor(random_state=0, n_estimators=20, n_jobs=-1, verbose=1)
+estimator = Lasso()
 #score = cross_val_score(estimator, df_dummies.drop(columns = 'price'), df_dummies.price, n_jobs=-1)
 #print(score)
 
