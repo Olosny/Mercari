@@ -5,50 +5,40 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import cross_val_score
-from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.ensemble import ExtraTreesRegressor
-from sklearn.ensemble import AdaBoostRegressor
-from sklearn.ensemble import BaggingRegressor
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.linear_model import Ridge
-from sklearn.linear_model import SGDRegressor
-from sklearn.linear_model import Lasso
-from sklearn.linear_model import ElasticNet
-from sklearn.svm import SVR
-from sklearn.svm import NuSVR
-
+from sklearn.model_selection import GridSearchCV
 
 # Functions
- # weighing function
+# weighing function
 def weighing(n, k, f):
     return (1 / (1 + np.exp(- (n - k) / f)))
 
- # Handling High Cardinality Categorical Features
+# Handling High Cardinality Categorical Features
 def ev_cat(n, ev_loc, ev_glob):
     k = 100
     f = 10
     lamb = weighing(n, k, f)
     return (lamb * ev_loc + (1 - lamb) * ev_glob)
 
+
 # Read and clean
 df_merc = pd.read_table('./train.tsv', index_col = 0)
 df_merc.drop(df_merc[df_merc.price == 0].index, inplace = True)
-
 df_cats = df_merc.category_name.str.split('/')
 cats = ['first_cat', 'second_cat', 'third_cat']
 
 for i in range(3):
     df_merc[cats[i]] = df_cats.str.get(i)
 
+
 # Hard clean
 df_merc.dropna(axis=0, how='any', inplace=True)
 
-# Take log of prices
+# Log
 df_merc['price'] = np.log(df_merc['price']+1)
 
-
-# Preprocessing categories and brand_names
+# lambda
 ev_price = df_merc.price.mean()
 df_merc['cat1_s']=df_merc.groupby('first_cat').price.transform('size')
 df_merc['cat1_m']=df_merc.groupby('first_cat').price.transform('mean')
@@ -76,26 +66,31 @@ df_merc.drop(columns = ['category_name', 'name', 'item_description','first_cat',
 
 
 # Regression
-estimators = []
-#estimators.append(RandomForestRegressor(n_estimators=20, n_jobs=-1,verbose=1))
-#estimators.append(ExtraTreesRegressor(n_estimators=20, n_jobs=-1,verbose=1))
-#estimators.append(AdaBoostRegressor())
-#estimators.append(BaggingRegressor(n_estimators=10,n_jobs=-1,verbose=True))
-#estimators.append(GradientBoostingRegressor(n_estimators=20, verbose=1))
-#estimators.append(Ridge())
-#estimators.append(SGDRegressor())
-#estimators.append(Lasso())
-#estimators.append(ElasticNet())
-#estimators.append(SVR(verbose=True))
-#estimators.append(NuSVR(verbose=True))
+estimator = RandomForestRegressor(n_jobs=-1)
+parameters = {'n_estimators':[1,2],'criterion':['mse','mae']}
+grid = GridSearchCV(estimator,parameters)
+grid.fit(df_merc.drop(columns = 'price'), df_merc.price)
 
+#score = cross_val_score(estimator, df_merc.drop(columns = 'price'), df_merc.price, n_jobs=-1)
+#print(score)
+#
+#   estimator.fit(df_merc.drop(columns = 'price'), df_merc.price)
+#   df_merc['predicted'] = estimator.predict(df_merc.drop(columns = 'price'))
+#   df_merc['eval'] = np.power(df_merc['predicted'] - df_merc['price'], 2)
+#   eval1 = np.sqrt(1 / len(df_merc['eval']) * df_merc['eval'].sum())
+#   print(n," ",eval1)
+#   df_merc.drop(columns=['predicted','eval'], inplace=True)
 
-for est in estimators:
-    train, test = train_test_split(df_merc, test_size=0.2)
-    print("estimator: ", est.__class__.__name__)
-    print("params: ", est.get_params())
-    est.fit(train.drop(columns = 'price'), train.price)
-    test['predicted'] = est.predict(test.drop(columns = 'price'))
-    test['eval'] = (test['predicted'] - test['price'])**2
-    eval1 = np.sqrt(1 / len(test['eval']) * test['eval'].sum())
-    print("score: ", eval1)
+"""
+for n in range(2,101):
+    estimator = ExtraTreesRegressor(random_state=0, n_estimators=n, n_jobs=-1)
+#score = cross_val_score(estimator, df_merc.drop(columns = 'price'), df_merc.price, n_jobs=-1)
+#print(score)
+#
+    estimator.fit(df_merc.drop(columns = 'price'), df_merc.price)
+    df_merc['predicted'] = estimator.predict(df_merc.drop(columns = 'price'))
+    df_merc['eval'] = np.power(df_merc['predicted'] - df_merc['price'], 2)
+    eval1 = np.sqrt(1 / len(df_merc['eval']) * df_merc['eval'].sum())
+    print(n," ",eval1)
+    df_merc.drop(columns=['predicted','eval'], inplace=True)
+"""
