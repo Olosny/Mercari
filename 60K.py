@@ -1,40 +1,42 @@
 #!/usr/bin/python3
 
 # Imports
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.model_selection import cross_val_score
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.ensemble import ExtraTreesRegressor
-from sklearn.ensemble import AdaBoostRegressor
-from sklearn.ensemble import BaggingRegressor
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.linear_model import Ridge
-from sklearn.linear_model import SGDRegressor
-from sklearn.linear_model import Lasso
-from sklearn.linear_model import ElasticNet
-from sklearn.svm import SVR
+import pandas as pd                                                                                                                                           
+import numpy as np                                                                                                                                            
+import matplotlib.pyplot as plt                                                                                                                               
+from sklearn.model_selection import cross_val_score                                                                                                           
+from sklearn.model_selection import train_test_split                                                                                                          
+from sklearn.ensemble import RandomForestRegressor                                                                                                            
+from sklearn.ensemble import ExtraTreesRegressor                                                                                                              
+from sklearn.ensemble import AdaBoostRegressor                                                                                                                
+from sklearn.ensemble import BaggingRegressor                                                                                                                 
+from sklearn.ensemble import GradientBoostingRegressor                                                                                                        
+from sklearn.linear_model import Ridge                                                                                                                        
+from sklearn.linear_model import SGDRegressor                                                                                                                 
+from sklearn.linear_model import Lasso                                                                                                                        
+from sklearn.linear_model import ElasticNet                                                                                                                   
+from sklearn.svm import SVR                                                                                                                                   
 from sklearn.svm import NuSVR
-
+from nltk.corpus import stopwords
+from collections import Counter
+import re
 
 # Functions
- # weighing function
+
+# weighing function
 def weighing(n, k, f):
     return (1 / (1 + np.exp(- (n - k) / f)))
 
- # Handling High Cardinality Categorical Features
+# Handling High Cardinality Categorical Features
 def ev_cat(n, ev_loc, ev_glob):
     k = 100
-    f = 10
+    f = 100
     lamb = weighing(n, k, f)
     return (lamb * ev_loc + (1 - lamb) * ev_glob)
 
 # Read and clean
 df_merc = pd.read_table('./train.tsv', index_col = 0)
 df_merc.drop(df_merc[df_merc.price == 0].index, inplace = True)
-
 df_cats = df_merc.category_name.str.split('/')
 cats = ['first_cat', 'second_cat', 'third_cat']
 
@@ -73,7 +75,35 @@ df_merc.drop(columns = ['cat1_S','cat12_S','cat123_S'], inplace = True)
 
 df_merc.drop(columns = ['category_name', 'name', 'item_description','first_cat','second_cat','third_cat','brand_name'], inplace = True)
 
+# Item Description
+stop = set(stopwords.words('english'))
+stop.add('i\'d')
+stop.add('i\'m')
+stop.add('i\'ll')
+stop.add('yes')
+stop.add('no')
+stop.add(';)')
+stop.add('***')
+stop.add('**')
+stop.add(':)')
+stop.add('(:')
+stop.add('(;')
+stop.add(':-)')
+stop.add('//')
+fake_chars_regex = '(^[(-])|([-:,!.?)"]*$)'
+counts = Counter([ re.sub(fake_chars_regex, '', i) for i in ' '.join(list(df_merc.item_description)).lower().split()
+    if i not in stop and len(i) > 1 ])
 
+word_dict = {}
+for k, v in counts.items():
+    if v > 5000:
+        word_dict.update({k : v})
+
+word_count = pd.DataFrame.from_dict(word_dict, orient ='index')
+word_count.drop(index = '', inplace = True)
+df_merc["cat_desc"] = df_merc.item_description.apply(lambda x : [i in x for i in word_count.index])
+df_merc[[i + '_desc' for i in list(word_count.index)]] = pd.DataFrame(df_merc.cat_desc.values.tolist(), index= df_merc.index)
+df_merc.drop(columns = 'cat_desc', inplace = True)
 
 # Regression
 estimators = []
