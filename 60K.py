@@ -72,6 +72,9 @@ for k, v in counts.items():
 
 word_count = pd.DataFrame.from_dict(word_dict, orient ='index')
 word_count.drop(index = '', inplace = True)
+df_merc["cat_desc"] = df_merc.item_description.apply(lambda x : [i in x for i in word_count.index])
+df_merc[[i + '_desc' for i in list(word_count.index)]] = pd.DataFrame(df_merc.cat_desc.values.tolist(), index= df_merc.index)
+df_merc.drop(columns = 'cat_desc', inplace = True)
 
 # Mapping Cat to their EV
 #ev_and_count_by_brand = df_merc.groupby('brand_name').price.aggregate(['size', 'mean'])
