@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import cross_val_score
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.ensemble import ExtraTreesRegressor
+from sklearn.model_selection import GridSearchCV
 
 # Functions
 # weighing function
@@ -65,17 +66,20 @@ df_merc.drop(columns = ['category_name', 'name', 'item_description','first_cat',
 
 
 # Regression
-for n in range(2,101):
-    estimator = RandomForestRegressor(random_state=0, n_estimators=n, n_jobs=-1)
+estimator = RandomForestRegressor(n_jobs=-1)
+parameters = {'n_estimators':[1,2],'criterion':['mse','mae']}
+grid = GridSearchCV(estimator,parameters)
+grid.fit(df_merc.drop(columns = 'price'), df_merc.price)
+
 #score = cross_val_score(estimator, df_merc.drop(columns = 'price'), df_merc.price, n_jobs=-1)
 #print(score)
 #
-    estimator.fit(df_merc.drop(columns = 'price'), df_merc.price)
-    df_merc['predicted'] = estimator.predict(df_merc.drop(columns = 'price'))
-    df_merc['eval'] = np.power(df_merc['predicted'] - df_merc['price'], 2)
-    eval1 = np.sqrt(1 / len(df_merc['eval']) * df_merc['eval'].sum())
-    print(n," ",eval1)
-    df_merc.drop(columns=['predicted','eval'], inplace=True)
+#   estimator.fit(df_merc.drop(columns = 'price'), df_merc.price)
+#   df_merc['predicted'] = estimator.predict(df_merc.drop(columns = 'price'))
+#   df_merc['eval'] = np.power(df_merc['predicted'] - df_merc['price'], 2)
+#   eval1 = np.sqrt(1 / len(df_merc['eval']) * df_merc['eval'].sum())
+#   print(n," ",eval1)
+#   df_merc.drop(columns=['predicted','eval'], inplace=True)
 
 """
 for n in range(2,101):
