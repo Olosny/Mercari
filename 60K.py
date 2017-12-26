@@ -73,7 +73,6 @@ df_merc['cat1234_S']=ev_cat(df_merc['cat1234_s'],df_merc['cat1234_m'],df_merc['c
 df_merc.drop(columns = ['cat1234_s','cat1234_m'], inplace = True)
 df_merc.drop(columns = ['cat1_S','cat12_S','cat123_S'], inplace = True)
 
-df_merc.drop(columns = ['category_name', 'name', 'item_description','first_cat','second_cat','third_cat','brand_name'], inplace = True)
 
 # Item Description
 stop = set(stopwords.words('english'))
@@ -100,14 +99,19 @@ for k, v in counts.items():
         word_dict.update({k : v})
 
 word_count = pd.DataFrame.from_dict(word_dict, orient ='index')
-word_count.drop(index = '', inplace = True)
+try:
+    word_count.drop(index = '', inplace = True)
+except ValueError:
+    pass
 df_merc["cat_desc"] = df_merc.item_description.apply(lambda x : [i in x for i in word_count.index])
 df_merc[[i + '_desc' for i in list(word_count.index)]] = pd.DataFrame(df_merc.cat_desc.values.tolist(), index= df_merc.index)
-df_merc.drop(columns = 'cat_desc', inplace = True)
+
+df_merc.drop(columns = ['category_name', 'name',
+    'item_description','first_cat','second_cat','third_cat','brand_name', 'cat_desc'], inplace = True)
 
 # Regression
 estimators = []
-#estimators.append(RandomForestRegressor(n_estimators=20, n_jobs=-1,verbose=1))
+estimators.append(RandomForestRegressor(n_estimators=20, n_jobs=-1,verbose=1))
 #estimators.append(ExtraTreesRegressor(n_estimators=20, n_jobs=-1,verbose=1))
 #estimators.append(AdaBoostRegressor())
 #estimators.append(BaggingRegressor(n_estimators=10,n_jobs=-1,verbose=True))
