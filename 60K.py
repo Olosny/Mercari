@@ -20,6 +20,10 @@ from sklearn.svm import NuSVR
 from nltk.corpus import stopwords
 from collections import Counter
 import re
+from nltk.tokenize import RegexpTokenizer
+from nltk.stem.porter import PorterStemmer
+from gensim import corpora, models
+from random import sample
 
 # Functions
 
@@ -75,43 +79,49 @@ df_merc.drop(columns = ['cat1_S','cat12_S','cat123_S'], inplace = True)
 
 
 # Item Description
+tokenizer = RegexpTokenizer(r'\w+')
+item_desc_tokens =[tokenizer.tokenize(i.lower()) for i in list(df_merc.item_description)]
+
 stop = set(stopwords.words('english'))
-stop.add('i\'d')
-stop.add('i\'m')
-stop.add('i\'ll')
-stop.add('yes')
-stop.add('no')
-stop.add(';)')
-stop.add('***')
-stop.add('**')
-stop.add(':)')
-stop.add('(:')
-stop.add('(;')
-stop.add(':-)')
-stop.add('//')
-fake_chars_regex = '(^[(-])|([-:,!.?)"]*$)'
-counts = Counter([ re.sub(fake_chars_regex, '', i) for i in ' '.join(list(df_merc.item_description)).lower().split()
-    if i not in stop and len(i) > 1 ])
+more_stop = ['i\'d', 'i\'m', 'i\'ll', ';)', '***', '**', ':)', '(:', '(;',
+        ':-)', '//']
+for i in more_stop:
+    stop.add(i)
 
-word_dict = {}
-for k, v in counts.items():
-    if v > 5000:
-        word_dict.update({k : v})
+desc_stopped_tokens = [[i for i in token if i not in stop] for token in item_desc_tokens]
+p_stemmer = PorterStemmer()
+desc_tokens = [[p_stemmer.stem(i) for i in token] for token in desc_stopped_tokens]
+#dictionary = corpora.Dictionary(desc_tokens)
+#corpus = [dictionary.doc2bow(text) for text in desc_tokens]
+#print("lda bitch")
+#ldamodel = models.ldamulticore.LdaMulticore(corpus, num_topics=30, id2word =
+#        dictionary, passes=15, batch = True, workers = 7)
+#fake_chars_regex = '(^[(-])|([-:,!.?)"]*$)'
+#counts = Counter([ re.sub(fake_chars_regex, '', i) for i in ' '.join(list(df_merc.item_description)).lower().split()
+#    if i not in stop and len(i) > 1 ])
+#
+#word_dict = {}
+#for k, v in counts.items():
+#    if v > 5000:
+#        word_dict.update({k : v})
+#
+#word_count = pd.DataFrame.from_dict(word_dict, orient ='index')
+#try:
+#    word_count.drop(index = '', inplace = True)
+#except ValueError:
+#    pass
+#df_merc["cat_desc"] = df_merc.item_description.apply(lambda x : [i in x for i in word_count.index])
+#df_merc[[i + '_desc' for i in list(word_count.index)]] = pd.DataFrame(df_merc.cat_desc.values.tolist(), index= df_merc.index)
 
-word_count = pd.DataFrame.from_dict(word_dict, orient ='index')
-try:
-    word_count.drop(index = '', inplace = True)
-except ValueError:
-    pass
-df_merc["cat_desc"] = df_merc.item_description.apply(lambda x : [i in x for i in word_count.index])
-df_merc[[i + '_desc' for i in list(word_count.index)]] = pd.DataFrame(df_merc.cat_desc.values.tolist(), index= df_merc.index)
+#df_merc.drop(columns = ['category_name', 'name',
+#    'item_description','first_cat','second_cat','third_cat','brand_name', 'cat_desc'], inplace = True)
 
-df_merc.drop(columns = ['category_name', 'name',
-    'item_description','first_cat','second_cat','third_cat','brand_name', 'cat_desc'], inplace = True)
+#df_merc.drop(columns = ['category_name', 'name',
+#    'first_cat','second_cat','third_cat','brand_name'], inplace = True)
 
 # Regression
 estimators = []
-estimators.append(RandomForestRegressor(n_estimators=20, n_jobs=-1,verbose=1))
+#estimators.append(RandomForestRegressor(n_estimators=20, n_jobs=-1,verbose=1))
 #estimators.append(ExtraTreesRegressor(n_estimators=20, n_jobs=-1,verbose=1))
 #estimators.append(AdaBoostRegressor())
 #estimators.append(BaggingRegressor(n_estimators=10,n_jobs=-1,verbose=True))
