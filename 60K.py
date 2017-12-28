@@ -40,7 +40,7 @@ MAX_BRAND_WORDS = 5000   # Completly random...
 MAX_CAT_WORDS = 5000     # Completly random...
 LAMBDA_K = 10            # tune EV weighted function
 LAMBDA_F = 1             #          //
-FUNC = 'median'          # function to use in high-level categorical features processing
+FUNC = 'mean'          # function to use in high-level categorical features processing
 
 
 ###############
@@ -48,13 +48,11 @@ FUNC = 'median'          # function to use in high-level categorical features pr
 ###############
 
 ## fast fill nans
-def na_remove(dfc):
-    df = dfc
+def na_remove(df):
     df['category_name'].fillna(value = 'missing_cat', inplace = True) # To improve
     df['brand_name'].fillna(value = 'missing_brand', inplace = True) # To improve
     df['item_description'].fillna(value = 'missing_desc', inplace = True) # To improve
     df['name'].fillna(value = 'missing_name', inplace = True) # To improve
-    return dfc
     
 ## weighted EV
 def ev_cat(n, ev_loc, ev_glob):
@@ -120,9 +118,14 @@ def csc_from_col(df, col, regex, max_voc): # Only Monograms for now
 
     p_stemmer = PorterStemmer()
     tokenizer = RegexpTokenizer(regex)
+    #stem_tokens = []
+    #for i in list(df[col]):
+    #    stem_mono_tokens = [p_stemmer.stem(j) for j in tokenizer.tokenize(i.lower()) if j not in stop]
+    #    stem_tokens.append([' '.join(i) for i in zip(stem_mono_tokens, stem_mono_tokens[1:])] + stem_mono_tokens)
     raw_tokens =[tokenizer.tokenize(i.lower()) for i in list(df[col])]
     stopped_tokens = [[i for i in token if i not in stop] for token in raw_tokens]
-    stem_tokens = [[p_stemmer.stem(i) for i in token] for token in stopped_tokens]
+    stem_mono_tokens = [[p_stemmer.stem(i) for i in token] for token in stopped_tokens]
+    stem_tokens = [[' '.join(i) for i in zip(tokens, tokens[1:])] + tokens for tokens in stem_mono_tokens]
     dictionary = corpora.Dictionary(stem_tokens)
     dictionary.filter_extremes(keep_n = max_voc)
     corpus = [dictionary.doc2bow(text) for text in stem_tokens]
@@ -131,8 +134,9 @@ def csc_from_col(df, col, regex, max_voc): # Only Monograms for now
     return matutils.corpus2csc(tfidf_corpus).transpose()
 
 
-
-
+##########
+## Main ##
+##########
 
 # Read and clean
 print("Read and PrePreprocessing")
@@ -140,17 +144,17 @@ print("Read and PrePreprocessing")
 ## Read train
 df_train = pd.read_table('./train.tsv', index_col = 0)
 df_train['price'] = np.log(df_train['price']+1)  # Price -> Log
-df_train = na_remove(df_train)                   # fill nans
 df_train = df_train[df_train['price'] != 0]      # drop price == 0$
 
 ## Read test
-df_test = pd.read_table('./test.tsv', index_col = 0)
+#df_test = pd.read_table('./test.tsv', index_col = 0)
 
 ### if run only on train ###
 df_train, df_test = train_test_split(df_train, test_size=0.3)
 
 split_index = len(df_train)                      
 whole = pd.concat([df_train, df_test])
+na_remove(whole)                   # fill nans
 
 print("Finished")
 ####################################
@@ -171,22 +175,22 @@ print("End name preprocessing")
 
 ## Brand Name
 print("Begin name preprocessing")
-#csc_brand = csc_from_col(whole, 'brand_name', r'\w+', MAX_BRAND_WORDS)
-train_brand, test_brand = merge_EV(df_train, df_test, ['brand_name'])
-csc_brand = csc_matrix(pd.concat([train_brand, test_brand]))
+csc_brand = csc_from_col(whole, 'brand_name', r'\w+', MAX_BRAND_WORDS)
+#train_brand, test_brand = merge_EV(df_train, df_test, ['brand_name'])
+#csc_brand = csc_matrix(pd.concat([train_brand, test_brand]))
 print("End name preprocessing")
 
 ## Category Name
 print("Begin category preprocessing")
-#csc_cat = csc_from_col(whole, 'category_name', r'(?:[^/]|//)+', MAX_CAT_WORDS)
-train_cat, test_cat = merge_EV(df_train, df_test, ['category_name'])
-csc_cat = csc_matrix(pd.concat([train_cat, test_cat]))
+csc_cat = csc_from_col(whole, 'category_name', r'(?:[^/]|//)+', MAX_CAT_WORDS)
+#train_cat, test_cat = merge_EV(df_train, df_test, ['category_name'])
+#csc_cat = csc_matrix(pd.concat([train_cat, test_cat]))
 print("End category preprocessing")
 
 ## Shipping and Item Condition
 print("Begin shipping and condition preprocessing")
-#csc_ship_cond = csc_matrix(pd.get_dummies(whole[['shipping', 'item_condition_id']], sparse = True))
-csc_ship_cond = whole[['shipping','item_condition_id']]
+csc_ship_cond = csc_matrix(pd.get_dummies(whole[['shipping', 'item_condition_id']], sparse = True))
+#csc_ship_cond = whole[['shipping','item_condition_id']]
 print("End shipping and condition preprocessing")
 
 ## Final csc
@@ -224,3 +228,8 @@ for est in estimators:
     df_test['eval'] = (df_test['predicted'] - df_test['price'])**2
     eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
     print("score: ", eval1)
+
+    '''est.fit(df_train.drop(['price'], axis=1), df_train.price)
+    df_sub = pd.DataFrame({'test_id':df_test.index})
+    df_sub['price'] = np.exp(est.predict(df_test))
+    df_sub.to_csv('submission.csv',index=False)'''
