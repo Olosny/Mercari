@@ -31,9 +31,11 @@ from nltk.stem.porter import PorterStemmer
 from gensim import corpora, models, matutils
 from random import sample
 
+# run sur train split ou sur test pour submit
+SUB = False
 
 # Strat
-NLP_STRAT = 'mix_nlp'     # 'no_nlp' 'mix_nlp' 'all_nlp' 'nlp+'
+NLP_STRAT = 'nlp+'     # 'no_nlp' 'mix_nlp' 'all_nlp' 'nlp+'
 
 # Constants
 MAX_DESC_WORDS = 100000  # Completly random...
@@ -161,18 +163,17 @@ df_train = df_train[df_train['price'] != 0]      # drop price == 0$
 fill_na_fast(df_train, ['item_description','name'])
 fill_na_unique(df_train, ['category_name','brand_name'])
 
-### if run only on train ###
-df_train, df_test = train_test_split(df_train, test_size=0.3)
+## if run only on train
+if not SUB:
+    df_train, df_test = train_test_split(df_train, test_size=0.3)
 
-
-split_index = len(df_train)                      
-whole = pd.concat([df_train, df_test])
-
+split_index = len(df_train) 
 print("Finished")
 
 
 # Preprocessing categorical columns
-print("Begin Preprocessing")
+print("Begin Preprocessing")                    
+whole = pd.concat([df_train, df_test])
 csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship_cond = None, None, None, None, None, None, None
 
 print("Begin description preprocessing")
@@ -208,37 +209,35 @@ print("End shipping and condition preprocessing")
 
 ## Final csc
 csc_final = hstack((csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship_cond))
+csc_train = csc_final.tocsr()[:split_index]
+csc_test = csc_final.tocsr()[split_index:]
 print('End Preprocessing')
 ######################################
 
 
 ### Regression ###
-estimators = []
-csc_train = csc_final.tocsr()[:split_index]
-csc_test = csc_final.tocsr()[split_index:]
-#estimators.append(RandomForestRegressor(n_estimators=20, n_jobs=-1,verbose=1))
-#estimators.append(ExtraTreesRegressor(n_estimators=20, n_jobs=-1,verbose=1))
-#estimators.append(AdaBoostRegressor())
-#estimators.append(BaggingRegressor(n_estimators=10,n_jobs=-1,verbose=True))
-#estimators.append(GradientBoostingRegressor(n_estimators=20, verbose=1))
-estimators.append(Ridge(solver="sag", fit_intercept=True, random_state=145, alpha = 0.7))
-#estimators.append(SGDRegressor())
-#estimators.append(Lasso())
-#estimators.append(ElasticNet())
-#estimators.append(SVR(verbose=True))
-#estimators.append(NuSVR(verbose=True))
+estimator = None
+#estimator = append(RandomForestRegressor(n_estimators=20, n_jobs=-1,verbose=1))
+#estimator = append(ExtraTreesRegressor(n_estimators=20, n_jobs=-1,verbose=1))
+#estimator = append(AdaBoostRegressor())
+#estimator = append(BaggingRegressor(n_estimators=10,n_jobs=-1,verbose=True))
+#estimator = append(GradientBoostingRegressor(n_estimators=20, verbose=1))
+estimators = append(Ridge(solver="sag", fit_intercept=True, random_state=145, alpha = 0.7))
+#estimator = append(SGDRegressor())
+#estimator = append(Lasso())
+#estimator = append(ElasticNet())
+#estimator = append(SVR(verbose=True))
+#estimator = append(NuSVR(verbose=True))
+print("estimator: ", est.__class__.__name__)
+print("params: ", est.get_params())
+est.fit(csc_train, df_train.price)
 
-
-for est in estimators:
-    print("estimator: ", est.__class__.__name__)
-    print("params: ", est.get_params())
-    est.fit(csc_train, df_train.price)
+if not SUB:
     df_test['predicted'] = est.predict(csc_test)
     df_test['eval'] = (df_test['predicted'] - df_test['price'])**2
     eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
     print("score: ", eval1)
-
-    '''est.fit(df_train.drop(['price'], axis=1), df_train.price)
+else:
     df_sub = pd.DataFrame({'test_id':df_test.index})
-    df_sub['price'] = np.exp(est.predict(df_test))-1
-    df_sub.to_csv('submission.csv',index=False)'''
+    df_sub['price'] = np.exp(est.predict(csc_test))-1
+    df_sub.to_csv('submission.csv',index=False)
