@@ -32,6 +32,8 @@ from gensim import corpora, models, matutils
 from random import sample
 
 
+# Strat
+NLP_STRAT = 'mix_nlp'     # 'no_nlp' 'mix_nlp' 'all_nlp' 'nlp+'
 
 # Constants
 MAX_DESC_WORDS = 100000  # Completly random...
@@ -43,16 +45,24 @@ LAMBDA_F = 1             #          //
 FUNC = 'mean'          # function to use in high-level categorical features processing
 
 
+
+
 ###############
 ## Functions ##
 ###############
 
-## fast fill nans
-def na_remove(df):
-    df['category_name'].fillna(value = 'missing_cat', inplace = True) # To improve
-    df['brand_name'].fillna(value = 'missing_brand', inplace = True) # To improve
-    df['item_description'].fillna(value = 'missing_desc', inplace = True) # To improve
-    df['name'].fillna(value = 'missing_name', inplace = True) # To improve
+## fast fill nans. columns must be a list
+def fill_na_fast(df, columns):
+    for col in columns:
+        df[col].fillna(value = 'missing_'+col, inplace = True)
+
+## fill nans with unique values. columns must be a list
+def fill_na_unique(df, columns):
+    n_col = len(columns)
+    n_nan = [df[columns[i]][pd.isnull(df[columns[i]])].size for i in range(n_col)]
+    fill_with = [[columns[i]+'_'+str(k) for k in range(n_nan[i])] for i in range(n_col)]
+    for i in range(n_col):
+        df[columns[i]][pd.isnull(df[columns[i]])] = fill_with[i]
     
 ## weighted EV
 def ev_cat(n, ev_loc, ev_glob):
@@ -62,8 +72,7 @@ def ev_cat(n, ev_loc, ev_glob):
     return (lamb * ev_loc + (1 - lamb) * ev_glob)
 
 ## Compute 'new' : EV from Categorical column(s) 'cats', weighted by 'prev'
-def cat_to_EV(dfc, cats, prev, new):
-    df = dfc
+def cat_to_EV(df, cats, prev, new):
     df['tmp_size']=df.groupby(cats)['price'].transform('size')
     df['tmp_func']=df.groupby(cats)['price'].transform(FUNC)
     if type(prev) is str:
@@ -71,7 +80,6 @@ def cat_to_EV(dfc, cats, prev, new):
     else :
         df[new]=ev_cat(df['tmp_size'],df['tmp_func'],prev)
     df.drop(['tmp_size','tmp_func'], axis=1, inplace = True)
-    return df
 
 ## EV column from 'cats' to train and merge it with test. cats must be a list
 def merge_EV(train, test, cats, keep_all=False):
@@ -80,7 +88,7 @@ def merge_EV(train, test, cats, keep_all=False):
     new = cats[0]+'_EV'
     all_cats = [new]
     if n_cats == 1:
-        train = cat_to_EV(train,cats,ev_price_tot,new)
+        cat_to_EV(train,cats,ev_price_tot,new)
         cor_cats=train.groupby(cats)[new].first().to_frame().reset_index()
         test = pd.merge(test, cor_cats, on=cats, how='left')
         test[new][pd.isnull(test[new])]=ev_price_tot
@@ -94,7 +102,7 @@ def merge_EV(train, test, cats, keep_all=False):
                 prev = new
             new += str(k)
             all_cats.append(new)
-            train = cat_to_EV(train,cats[:(k+1)],prev,new)
+            cat_to_EV(train,cats[:(k+1)],prev,new)
             cor_cats.append(train.groupby(cats[:(k+1)])[new].first().to_frame().reset_index())
             test = pd.merge(test, cor_cats[k], on=cats[:(k+1)], how='left')
             if k == 0:
@@ -142,68 +150,69 @@ def csc_from_col(df, col, regex, max_voc): # Only Monograms for now
 print("Read and PrePreprocessing")
 
 ## Read train
-df_train = pd.read_table('./train.tsv', index_col = 0)
+df_train = pd.read_table('../input/train.tsv', index_col = 0)
 df_train['price'] = np.log(df_train['price']+1)  # Price -> Log
 df_train = df_train[df_train['price'] != 0]      # drop price == 0$
 
 ## Read test
-#df_test = pd.read_table('./test.tsv', index_col = 0)
+#df_test = pd.read_table('../input/test.tsv', index_col = 0)
+
+## fill nans
+fill_na_fast(df_train, ['item_description','name'])
+fill_na_unique(df_train, ['category_name','brand_name'])
 
 ### if run only on train ###
 df_train, df_test = train_test_split(df_train, test_size=0.3)
 
+
 split_index = len(df_train)                      
 whole = pd.concat([df_train, df_test])
-na_remove(whole)                   # fill nans
 
 print("Finished")
-####################################
 
 
 # Preprocessing categorical columns
 print("Begin Preprocessing")
+csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship_cond = None, None, None, None, None, None, None
 
-## Item Description
 print("Begin description preprocessing")
-csc_desc = csc_from_col(whole, 'item_description', r'\w+', MAX_DESC_WORDS)
+if (NLP_STRAT == 'all_nlp') or (NLP_STRAT == 'mix_nlp'):
+    csc_desc = csc_from_col(whole, 'item_description', r'\w+', MAX_DESC_WORDS)
 print("End description preprocessing")
-
-## Name
+    
 print("Begin name preprocessing")
-csc_name = csc_from_col(whole, 'name', r'\w+', MAX_NAME_WORDS)
+if (NLP_STRAT == 'all_nlp') or (NLP_STRAT == 'mix_nlp'):
+    csc_name = csc_from_col(whole, 'name', r'\w+', MAX_NAME_WORDS)
+print("End name preprocessing")
+    
+print("Begin brand name preprocessing")
+if (NLP_STRAT == 'all_nlp') or (NLP_STRAT == 'nlp+'):
+    csc_brand = csc_from_col(whole, 'brand_name', r'\w+', MAX_BRAND_WORDS)
+if (NLP_STRAT == 'mix_nlp') or (NLP_STRAT == 'nlp+') or (NLP_STRAT == 'no_nlp'):
+    train_brand, test_brand = merge_EV(df_train, df_test, ['brand_name'])
+    csc_brand_SI = csc_matrix(pd.concat([train_brand, test_brand]))
 print("End name preprocessing")
 
-## Brand Name
-print("Begin name preprocessing")
-csc_brand = csc_from_col(whole, 'brand_name', r'\w+', MAX_BRAND_WORDS)
-#train_brand, test_brand = merge_EV(df_train, df_test, ['brand_name'])
-#csc_brand = csc_matrix(pd.concat([train_brand, test_brand]))
-print("End name preprocessing")
-
-## Category Name
 print("Begin category preprocessing")
-csc_cat = csc_from_col(whole, 'category_name', r'(?:[^/]|//)+', MAX_CAT_WORDS)
-#train_cat, test_cat = merge_EV(df_train, df_test, ['category_name'])
-#csc_cat = csc_matrix(pd.concat([train_cat, test_cat]))
+if (NLP_STRAT == 'all_nlp') or (NLP_STRAT == 'nlp+'):
+    csc_cat = csc_from_col(whole, 'category_name', r'(?:[^/]|//)+', MAX_CAT_WORDS)
+if (NLP_STRAT == 'mix_nlp') or (NLP_STRAT == 'nlp+') or (NLP_STRAT == 'no_nlp'):
+    train_cat, test_cat = merge_EV(df_train, df_test, ['category_name'])
+    csc_cat_SI = csc_matrix(pd.concat([train_cat, test_cat]))
 print("End category preprocessing")
 
-## Shipping and Item Condition
 print("Begin shipping and condition preprocessing")
-csc_ship_cond = csc_matrix(pd.get_dummies(whole[['shipping', 'item_condition_id']], sparse = True))
-#csc_ship_cond = whole[['shipping','item_condition_id']]
+#csc_ship_cond = csc_matrix(pd.get_dummies(whole[['shipping', 'item_condition_id']], sparse = True))
+csc_ship_cond = whole[['shipping','item_condition_id']]
 print("End shipping and condition preprocessing")
 
 ## Final csc
-csc_final = hstack((csc_name, csc_brand, csc_cat, csc_ship_cond, csc_desc))
+csc_final = hstack((csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship_cond))
 print('End Preprocessing')
 ######################################
 
 
-
-################
-## Regression ##
-################
-
+### Regression ###
 estimators = []
 csc_train = csc_final.tocsr()[:split_index]
 csc_test = csc_final.tocsr()[split_index:]
@@ -231,5 +240,5 @@ for est in estimators:
 
     '''est.fit(df_train.drop(['price'], axis=1), df_train.price)
     df_sub = pd.DataFrame({'test_id':df_test.index})
-    df_sub['price'] = np.exp(est.predict(df_test))
+    df_sub['price'] = np.exp(est.predict(df_test))-1
     df_sub.to_csv('submission.csv',index=False)'''
