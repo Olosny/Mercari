@@ -44,7 +44,7 @@ MAX_BRAND_WORDS = 5000   # Completly random...
 MAX_CAT_WORDS = 5000     # Completly random...
 LAMBDA_K = 10            # tune EV weighted function
 LAMBDA_F = 1             #          //
-FUNC = 'mean'          # function to use in high-level categorical features processing
+FUNC = 'mean'            # function to use in high-level categorical features processing
 
 
 
@@ -222,22 +222,22 @@ estimator = None
 #estimator = AdaBoostRegressor()
 #estimator = BaggingRegressor(n_estimators=10,n_jobs=-1,verbose=True)
 #estimator = GradientBoostingRegressor(n_estimators=20, verbose=1)
-estimators = Ridge(solver="sag", fit_intercept=True, random_state=145, alpha = 0.7)
+estimator = Ridge(solver="sag", fit_intercept=True, random_state=145, alpha = 0.7)
 #estimator = SGDRegressor()
 #estimator = Lasso()
 #estimator = ElasticNet()
 #estimator = SVR(verbose=True)
 #estimator = NuSVR(verbose=True)
-print("estimator: ", est.__class__.__name__)
-print("params: ", est.get_params())
-est.fit(csc_train, df_train.price)
+print("estimator: ", estimator.__class__.__name__)
+print("params: ", estimator.get_params())
+estimator.fit(csc_train, df_train.price)
 
 if not SUB:
-    df_test['predicted'] = est.predict(csc_test)
+    df_test['predicted'] = estimator.predict(csc_test)
     df_test['eval'] = (df_test['predicted'] - df_test['price'])**2
     eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
     print("score: ", eval1)
 else:
     df_sub = pd.DataFrame({'test_id':df_test.index})
-    df_sub['price'] = np.exp(est.predict(csc_test))-1
+    df_sub['price'] = np.exp(estimator.predict(csc_test))-1
     df_sub.to_csv('submission.csv',index=False)
