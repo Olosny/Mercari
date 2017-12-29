@@ -177,19 +177,19 @@ whole = pd.concat([df_train, df_test])
 csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship_cond = None, None, None, None, None, None, None
 
 print("Begin description preprocessing")
-if (NLP_STRAT == 'all_nlp') or (NLP_STRAT == 'mix_nlp'):
+if NLP_STRAT != 'no_nlp':
     csc_desc = csc_from_col(whole, 'item_description', r'\w+', MAX_DESC_WORDS)
 print("End description preprocessing")
     
 print("Begin name preprocessing")
-if (NLP_STRAT == 'all_nlp') or (NLP_STRAT == 'mix_nlp'):
+if NLP_STRAT != 'no_nlp':
     csc_name = csc_from_col(whole, 'name', r'\w+', MAX_NAME_WORDS)
 print("End name preprocessing")
     
 print("Begin brand name preprocessing")
 if (NLP_STRAT == 'all_nlp') or (NLP_STRAT == 'nlp+'):
     csc_brand = csc_from_col(whole, 'brand_name', r'\w+', MAX_BRAND_WORDS)
-if (NLP_STRAT == 'mix_nlp') or (NLP_STRAT == 'nlp+') or (NLP_STRAT == 'no_nlp'):
+if NLP_STRAT != 'all_nlp':
     train_brand, test_brand = merge_EV(df_train, df_test, ['brand_name'])
     csc_brand_SI = csc_matrix(pd.concat([train_brand, test_brand]))
 print("End name preprocessing")
@@ -197,7 +197,7 @@ print("End name preprocessing")
 print("Begin category preprocessing")
 if (NLP_STRAT == 'all_nlp') or (NLP_STRAT == 'nlp+'):
     csc_cat = csc_from_col(whole, 'category_name', r'(?:[^/]|//)+', MAX_CAT_WORDS)
-if (NLP_STRAT == 'mix_nlp') or (NLP_STRAT == 'nlp+') or (NLP_STRAT == 'no_nlp'):
+if NLP_STRAT != 'all_nlp':
     train_cat, test_cat = merge_EV(df_train, df_test, ['category_name'])
     csc_cat_SI = csc_matrix(pd.concat([train_cat, test_cat]))
 print("End category preprocessing")
@@ -217,17 +217,17 @@ print('End Preprocessing')
 
 ### Regression ###
 estimator = None
-#estimator = append(RandomForestRegressor(n_estimators=20, n_jobs=-1,verbose=1))
-#estimator = append(ExtraTreesRegressor(n_estimators=20, n_jobs=-1,verbose=1))
-#estimator = append(AdaBoostRegressor())
-#estimator = append(BaggingRegressor(n_estimators=10,n_jobs=-1,verbose=True))
-#estimator = append(GradientBoostingRegressor(n_estimators=20, verbose=1))
-estimators = append(Ridge(solver="sag", fit_intercept=True, random_state=145, alpha = 0.7))
-#estimator = append(SGDRegressor())
-#estimator = append(Lasso())
-#estimator = append(ElasticNet())
-#estimator = append(SVR(verbose=True))
-#estimator = append(NuSVR(verbose=True))
+#estimator = RandomForestRegressor(n_estimators=20, n_jobs=-1,verbose=1)
+#estimator = ExtraTreesRegressor(n_estimators=20, n_jobs=-1,verbose=1)
+#estimator = AdaBoostRegressor()
+#estimator = BaggingRegressor(n_estimators=10,n_jobs=-1,verbose=True)
+#estimator = GradientBoostingRegressor(n_estimators=20, verbose=1)
+estimators = Ridge(solver="sag", fit_intercept=True, random_state=145, alpha = 0.7)
+#estimator = SGDRegressor()
+#estimator = Lasso()
+#estimator = ElasticNet()
+#estimator = SVR(verbose=True)
+#estimator = NuSVR(verbose=True)
 print("estimator: ", est.__class__.__name__)
 print("params: ", est.get_params())
 est.fit(csc_train, df_train.price)
