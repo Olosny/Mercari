@@ -13,6 +13,7 @@ from scipy.sparse import csc_matrix, hstack
 ## sklearn
 #from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import train_test_split
+#from sklearn.ensemble import IsolationForest
 #from sklearn.ensemble import RandomForestRegressor
 #from sklearn.ensemble import ExtraTreesRegressor
 #from sklearn.ensemble import AdaBoostRegressor
@@ -31,7 +32,7 @@ from nltk.tokenize import RegexpTokenizer
 from nltk.stem.snowball import SnowballStemmer
 from joblib import Parallel, delayed
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
-from sklearn.preprocessing import OneHotEncoder, MultiLabelBinarizer
+from sklearn.preprocessing import OneHotEncoder, MultiLabelBinarizer, RobustScaler
 #from collections import Counter
 #import re
 from gensim import corpora, models, matutils
@@ -232,20 +233,24 @@ def multilabel(df, col, char_split = None):
 print("Read and PrePreprocessing : " + str(datetime.datetime.now().time()))
 
 ## Read train
-df_train = pd.read_table('../input/train.tsv', index_col = 0)             # for kaggle kernel
-df_train['price'] = np.log(df_train['price']+1)  # Price -> Log
-df_train = df_train[df_train['price'] != 0]      # drop price == 0$
+df_train = pd.read_table('../input/train.tsv', index_col = 0)            
+df_train = df_train[df_train['price'] != 0]                    # drop price == 0$
+df_train['price'] = np.log(df_train['price']+1)                # Price -> Log
+df_train['has_brand'] = pd.notnull(df_train['brand_name']).apply(int)
 
-## Read test
-#df_test = pd.read_table('../input/test.tsv', index_col = 0)
-
-## fill nans
 fill_na_fast(df_train, ['item_description','name'])
 fill_na_unique(df_train, ['category_name','brand_name'])
 
-## if run only on train
-if not SUB:
-    df_train, df_test = train_test_split(df_train, test_size=0.3)
+## Read test
+if SUB:
+  df_test = pd.read_table('../input/test.tsv', index_col = 0)
+  df_test['has_brand'] = pd.notnull(df_test['brand_name']).apply(int)
+  fill_na_fast(df_test, ['item_description','name'])
+  fill_na_fast(df_test, ['category_name','brand_name'])
+  
+else:
+  df_train, df_test = train_test_split(df_train, test_size=0.3)
+
 
 split_index = len(df_train) 
 print("Finished PrePreprocessing : " + str(datetime.datetime.now().time()))
@@ -259,13 +264,13 @@ csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship_cond 
 print("Begin description preprocessing : " + str(datetime.datetime.now().time()))
 if NLP_STRAT != 'no_nlp':
     #csc_desc = csc_from_col(whole, 'item_description', r'\w+', MAX_DESC_WORDS, tfidf = True)
-    csc_desc = csc_from_col(whole, 'item_description')
+    csc_desc = csc_from_col(whole, 'item_description', idf_log = True)
 print("End description preprocessing : " + str(datetime.datetime.now().time()))
     
 print("Begin name preprocessing : " + str(datetime.datetime.now().time()))
 if NLP_STRAT != 'no_nlp':
     #csc_name = csc_from_col(whole, 'name', r'\w+', MAX_NAME_WORDS)
-    csc_name = csc_from_col(whole, 'name')
+    csc_name = csc_from_col(whole, 'name', idf_log = True)
 print("End name preprocessing : " + str(datetime.datetime.now().time()))
     
 print("Begin brand name preprocessing : " + str(datetime.datetime.now().time()))
@@ -295,6 +300,7 @@ print("End shipping and condition preprocessing : " + str(datetime.datetime.now(
 
 ## Final csc
 csc_final = hstack((csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship_cond))
+
 print("csc_final shape : " + str(csc_final.shape))
 #print("csc_final non zero : " + str(csc_final.count_nonzero()))
 #print("csc_final sparsity : " + str(csc_final.count_nonzero()/(csc_final.shape[0]*csc_final.shape[1])))
@@ -302,7 +308,6 @@ csc_train = csc_final.tocsr()[:split_index]
 csc_test = csc_final.tocsr()[split_index:]
 print("End Preprocessing : " + str(datetime.datetime.now().time()))
 ######################################
-
 
 ### Regression ###
 estimator = None
@@ -322,11 +327,15 @@ print("params: ", estimator.get_params())
 estimator.fit(csc_train, df_train.price)
 
 if not SUB:
-    df_test['predicted'] = estimator.predict(csc_test)
-    df_test['eval'] = (df_test['predicted'] - df_test['price'])**2
-    eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
-    print("score: ", eval1)
+   df_test['predicted'] = estimator.predict(csc_test)
+   df_test['predicted'] = np.exp(df_test['predicted'])-1
+   df_test['predicted'][df_test['predicted']<3] = 3
+   df_test['predicted'] = np.log(df_test['predicted']+1)
+   df_test['eval'] = (df_test['predicted'] - df_test['price'])**2
+   eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
+   print("score: ", eval1)
 else:
-    df_sub = pd.DataFrame({'test_id':df_test.index})
-    df_sub['price'] = np.exp(estimator.predict(csc_test))-1
-    df_sub.to_csv('submission.csv',index=False)
+   df_sub = pd.DataFrame({'test_id':df_test.index})
+   df_sub['price'] = np.exp(estimator.predict(csc_test))-1
+   df_sub['price'][df_sub['price'] < 3] = 3
+   df_sub.to_csv('submission.csv',index=False)
