@@ -27,8 +27,10 @@ from sklearn.linear_model import SGDRegressor
 ## nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import RegexpTokenizer
-from nltk.stem.porter import PorterStemmer
+#from nltk.stem.porter import PorterStemmer
+from nltk.stem.snowball import SnowballStemmer
 from joblib import Parallel, delayed
+from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
 #from collections import Counter
 #import re
 from gensim import corpora, models, matutils
@@ -130,13 +132,13 @@ def merge_EV(train, test, cats, keep_all=False):
 #    stem_mono_tokens = [p_stemmer.stem(j) for j in tokenizer.tokenize(i.lower()) if j not in stop]
 #    return [' '.join(i) for i in zip(stem_mono_tokens, stem_mono_tokens[1:])] + stem_mono_tokens
 
-def build_corpus(i,regex):
-    #stem_mono_tokens = Parallel(n_jobs=4)(delayed(p_stemmer.stem)(j) for j in i if j not in stop)
-    p_stemmer = PorterStemmer()
-    tokenizer = RegexpTokenizer(regex)
-    stem_mono_tokens = [p_stemmer.stem(j) for j in tokenizer.tokenize(i.lower()) if j not in stop]
-    stem_tokens = [' '.join(i) for i in zip(stem_mono_tokens, stem_mono_tokens[1:])] + stem_mono_tokens
-    return corpora.hashdictionary.HashDictionary(stem_tokens, id_range = 20000000).doc2bow(stem_tokens)
+#def build_corpus(i,regex):
+#    #stem_mono_tokens = Parallel(n_jobs=4)(delayed(p_stemmer.stem)(j) for j in i if j not in stop)
+#    p_stemmer = PorterStemmer()
+#    tokenizer = RegexpTokenizer(regex)
+#    stem_mono_tokens = [p_stemmer.stem(j) for j in tokenizer.tokenize(i.lower()) if j not in stop]
+#    stem_tokens = [' '.join(i) for i in zip(stem_mono_tokens, stem_mono_tokens[1:])] + stem_mono_tokens
+#    return corpora.hashdictionary.HashDictionary(stem_tokens, id_range = 20000000).doc2bow(stem_tokens)
 
 #def my_dic_merge(dic_list):
 #    dic_len = len(dic_list[0])
@@ -150,41 +152,64 @@ def build_corpus(i,regex):
 #    return a
 
 ## corpus2csc
-def csc_from_col(df, col, regex, max_voc, tfidf = False): # Only Monograms for now
-    #chunk_num = 3
-    #p_stemmer = PorterStemmer()
-    #tokenizer = RegexpTokenizer(regex)
-    #print("gettokens start : " + str(datetime.datetime.now().time()))
-    #stem_tokens = Parallel(n_jobs=3)(delayed(get_tokens)(i, regex) for i in list(df[col]))
-    #print("gettokens end start dictionary: " + str(datetime.datetime.now().time()))
-    #stem_tokens = [get_tokens(tokenizer.tokenize(i.lower())) for i in list(df[col])]
-    #for i in list(df[col]):
-    #    stem_mono_tokens = [p_stemmer.stem(j) for j in tokenizer.tokenize(i.lower()) if j not in stop]
-    #    stem_tokens.append([' '.join(i) for i in zip(stem_mono_tokens, stem_mono_tokens[1:])] + stem_mono_tokens)
-    #raw_tokens =tokenizer.tokenize(i.lower()) for i in list(df[col])]
-    #stopped_tokens = [[i for i in token if i not in stop] for token in raw_tokens]
-    #stem_mono_tokens = [[p_stemmer.stem(i) for i in token] for token in stopped_tokens]
-    #stem_tokens = [[' '.join(i) for i in zip(tokens, tokens[1:])] + tokens for tokens in stem_mono_tokens]
-    #gc.collect()
-    #tok_chunk = [stem_tokens[i::chunk_num] for i in range(chunk_num)]
-    #dictionary = corpora.hashdictionary.HashDictionary(stem_tokens)
-    #dictionaries = Parallel(n_jobs=3)(delayed(corpora.Dictionary)(tok) for tok in tok_chunk)
-    #print("dictionary end start dictionary_merge: " + str(datetime.datetime.now().time()))
-    #dictionary = my_dic_merge(dictionaries)
-    #print("dictionary_merge end start dictionary_filter: " + str(datetime.datetime.now().time()))
-    #dictionary.filter_extremes(keep_n = max_voc)
-    print("dictionary_filter end start corpus: " + str(datetime.datetime.now().time()))
-    #corpus = [hashdictionary.HashDictionary(text).doc2bow(text) for text in stem_tokens]
-    corpus = Parallel(n_jobs = 3)(delayed(build_corpus)(i, regex) for i in list(df[col]))
+#def csc_from_col(df, col, regex, max_voc, tfidf = False): # Only Monograms for now
+#    #chunk_num = 3
+#    #p_stemmer = PorterStemmer()
+#    #tokenizer = RegexpTokenizer(regex)
+#    #print("gettokens start : " + str(datetime.datetime.now().time()))
+#    #stem_tokens = Parallel(n_jobs=3)(delayed(get_tokens)(i, regex) for i in list(df[col]))
+#    #print("gettokens end start dictionary: " + str(datetime.datetime.now().time()))
+#    #stem_tokens = [get_tokens(tokenizer.tokenize(i.lower())) for i in list(df[col])]
+#    #for i in list(df[col]):
+#    #    stem_mono_tokens = [p_stemmer.stem(j) for j in tokenizer.tokenize(i.lower()) if j not in stop]
+#    #    stem_tokens.append([' '.join(i) for i in zip(stem_mono_tokens, stem_mono_tokens[1:])] + stem_mono_tokens)
+#    #raw_tokens =tokenizer.tokenize(i.lower()) for i in list(df[col])]
+#    #stopped_tokens = [[i for i in token if i not in stop] for token in raw_tokens]
+#    #stem_mono_tokens = [[p_stemmer.stem(i) for i in token] for token in stopped_tokens]
+#    #stem_tokens = [[' '.join(i) for i in zip(tokens, tokens[1:])] + tokens for tokens in stem_mono_tokens]
+#    #gc.collect()
+#    #tok_chunk = [stem_tokens[i::chunk_num] for i in range(chunk_num)]
+#    #dictionary = corpora.hashdictionary.HashDictionary(stem_tokens)
+#    #dictionaries = Parallel(n_jobs=3)(delayed(corpora.Dictionary)(tok) for tok in tok_chunk)
+#    #print("dictionary end start dictionary_merge: " + str(datetime.datetime.now().time()))
+#    #dictionary = my_dic_merge(dictionaries)
+#    #print("dictionary_merge end start dictionary_filter: " + str(datetime.datetime.now().time()))
+#    #dictionary.filter_extremes(keep_n = max_voc)
+#    print("dictionary_filter end start corpus: " + str(datetime.datetime.now().time()))
+#    #corpus = [hashdictionary.HashDictionary(text).doc2bow(text) for text in stem_tokens]
+#    corpus = Parallel(n_jobs = 3)(delayed(build_corpus)(i, regex) for i in list(df[col]))
+#    if tfidf:
+#        tfidf = models.TfidfModel(corpus)
+#        tfidf_corpus = tfidf[corpus]
+#        print("corpus end start return: " + str(datetime.datetime.now().time()))
+#        my_csc_matrix = matutils.corpus2csc(tfidf_corpus).transpose()
+#    else:
+#        print("corpus end start return: " + str(datetime.datetime.now().time()))
+#        my_csc_matrix = matutils.corpus2csc(corpus).transpose()
+#    return my_csc_matrix
+
+# corpus2csc
+def csc_from_col(df, col, tfidf = True, min_ngram = 1, max_ngram = 3, max_df = 1.0, min_df = 1, max_features = 2000000, idf_log = False, smooth_idf = True):
+
+    #def stemming(doc):
+    #    return (my_stemmer.stem(w) for w in my_analyzer(doc))
+
+    #my_stemmer = SnowballStemmer('english', ignore_stopwords = True)
+    #my_analyzer = CountVectorizer().build_analyzer()
+    my_vectorizer = CountVectorizer(stop_words = stop,
+                                    ngram_range = (min_ngram, max_ngram),
+                                    max_df = max_df,
+                                    min_df = min_df,
+                                    max_features = max_features)
+                                    #analyzer = stemming)
+    my_doc_term = my_vectorizer.fit_transform(df[col])
     if tfidf:
-        tfidf = models.TfidfModel(corpus)
-        tfidf_corpus = tfidf[corpus]
-        print("corpus end start return: " + str(datetime.datetime.now().time()))
-        my_csc_matrix = matutils.corpus2csc(tfidf_corpus).transpose()
-    else:
-        print("corpus end start return: " + str(datetime.datetime.now().time()))
-        my_csc_matrix = matutils.corpus2csc(corpus).transpose()
-    return my_csc_matrix
+        tfidf_trans = TfidfTransformer(smooth_idf = smooth_idf, sublinear_tf = idf_log)
+        my_doc_term = tfidf_trans.fit_transform(my_doc_term)
+    return my_doc_term
+
+
+
 
 
 ##########
@@ -221,25 +246,29 @@ csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship_cond 
 
 print("Begin description preprocessing : " + str(datetime.datetime.now().time()))
 if NLP_STRAT != 'no_nlp':
-    csc_desc = csc_from_col(whole, 'item_description', r'\w+', MAX_DESC_WORDS, tfidf = True)
+    #csc_desc = csc_from_col(whole, 'item_description', r'\w+', MAX_DESC_WORDS, tfidf = True)
+    csc_desc = csc_from_col(whole, 'item_description')
 print("End description preprocessing : " + str(datetime.datetime.now().time()))
     
 print("Begin name preprocessing : " + str(datetime.datetime.now().time()))
 if NLP_STRAT != 'no_nlp':
-    csc_name = csc_from_col(whole, 'name', r'\w+', MAX_NAME_WORDS)
+    #csc_name = csc_from_col(whole, 'name', r'\w+', MAX_NAME_WORDS)
+    csc_name = csc_from_col(whole, 'name')
 print("End name preprocessing : " + str(datetime.datetime.now().time()))
     
-print("Begin brand name preprocessing" + str(datetime.datetime.now().time()))
+print("Begin brand name preprocessing : " + str(datetime.datetime.now().time()))
 if (NLP_STRAT == 'all_nlp') or (NLP_STRAT == 'nlp+'):
-    csc_brand = csc_from_col(whole, 'brand_name', r'\w+', MAX_BRAND_WORDS)
+    #csc_brand = csc_from_col(whole, 'brand_name', r'\w+', MAX_BRAND_WORDS)
+    csc_brand = csc_from_col(whole, 'brand_name')
 if NLP_STRAT != 'all_nlp':
     train_brand, test_brand = merge_EV(df_train, df_test, ['brand_name'])
     csc_brand_SI = csc_matrix(pd.concat([train_brand, test_brand]))
-print("End brand name preprocessing" + str(datetime.datetime.now().time()))
+print("End brand name preprocessing : " + str(datetime.datetime.now().time()))
 
 print("Begin category preprocessing : " + str(datetime.datetime.now().time()))
 if (NLP_STRAT == 'all_nlp') or (NLP_STRAT == 'nlp+'):
-    csc_cat = csc_from_col(whole, 'category_name', r'(?:[^/]|//)+', MAX_CAT_WORDS)
+    #csc_cat = csc_from_col(whole, 'category_name', r'(?:[^/]|//)+', MAX_CAT_WORDS)
+    csc_cat = csc_from_col(whole, 'category_name')
 if NLP_STRAT != 'all_nlp':
     train_cat, test_cat = merge_EV(df_train, df_test, ['category_name'])
     csc_cat_SI = csc_matrix(pd.concat([train_cat, test_cat]))
@@ -253,8 +282,8 @@ print("End shipping and condition preprocessing : " + str(datetime.datetime.now(
 ## Final csc
 csc_final = hstack((csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship_cond))
 print("csc_final shape : " + str(csc_final.shape))
-print("csc_final non zero : " + str(csc_final.count_nonzero()))
-print("csc_final sparsity : " + str(csc_final.count_nonzero()/(csc_final.shape[0]*csc_final.shape[1])))
+#print("csc_final non zero : " + str(csc_final.count_nonzero()))
+#print("csc_final sparsity : " + str(csc_final.count_nonzero()/(csc_final.shape[0]*csc_final.shape[1])))
 csc_train = csc_final.tocsr()[:split_index]
 csc_test = csc_final.tocsr()[split_index:]
 print("End Preprocessing : " + str(datetime.datetime.now().time()))
@@ -268,7 +297,7 @@ estimator = None
 #estimator = AdaBoostRegressor()
 #estimator = BaggingRegressor(n_estimators=10,n_jobs=-1,verbose=True)
 #estimator = GradientBoostingRegressor(n_estimators=20, verbose=1)
-estimator = Ridge(solver="sag", fit_intercept=True, random_state=145, alpha = 0.7)
+estimator = Ridge(solver="sag", fit_intercept=True, random_state=145, alpha = 3)
 #estimator = SGDRegressor()
 #estimator = Lasso()
 #estimator = ElasticNet()
