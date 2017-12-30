@@ -31,6 +31,7 @@ from nltk.tokenize import RegexpTokenizer
 from nltk.stem.snowball import SnowballStemmer
 from joblib import Parallel, delayed
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
+from sklearn.preprocessing import OneHotEncoder, MultiLabelBinarizer
 #from collections import Counter
 #import re
 from gensim import corpora, models, matutils
@@ -43,13 +44,13 @@ SUB = False
 NLP_STRAT = 'all_nlp'     # 'no_nlp' 'mix_nlp' 'all_nlp' 'nlp+'
 
 # Constants
-MAX_DESC_WORDS = 100000  # Completly random...
-MAX_NAME_WORDS = 20000   # Completly random...
-MAX_BRAND_WORDS = 5000   # Completly random...
-MAX_CAT_WORDS = 5000     # Completly random...
-LAMBDA_K = 10            # tune EV weighted function
-LAMBDA_F = 1             #          //
-FUNC = 'mean'          # function to use in high-level categorical features processing
+#MAX_DESC_WORDS = 100000  # Completly random...
+#MAX_NAME_WORDS = 20000   # Completly random...
+#MAX_BRAND_WORDS = 5000   # Completly random...
+#MAX_CAT_WORDS = 5000     # Completly random...
+#LAMBDA_K = 10            # tune EV weighted function
+#LAMBDA_F = 1             #          //
+#FUNC = 'mean'          # function to use in high-level categorical features processing
 stop = set(stopwords.words('english'))
 more_stop = ['i\'d', 'i\'m', 'i\'ll', ';)', '***', '**', ':)', '(:', '(;',
         ':-)', '//']
@@ -190,6 +191,7 @@ def merge_EV(train, test, cats, keep_all=False):
 
 # corpus2csc
 def csc_from_col(df, col, tfidf = True, min_ngram = 1, max_ngram = 3, max_df = 1.0, min_df = 1, max_features = 2000000, idf_log = False, smooth_idf = True):
+#def csc_from_col(df, col, tfidf = True, min_ngram = 1, max_ngram = 1, max_df = 1.0, min_df = 1, max_features = 20000000, idf_log = False, smooth_idf = True):
 
     #def stemming(doc):
     #    return (my_stemmer.stem(w) for w in my_analyzer(doc))
@@ -197,20 +199,30 @@ def csc_from_col(df, col, tfidf = True, min_ngram = 1, max_ngram = 3, max_df = 1
     #my_stemmer = SnowballStemmer('english', ignore_stopwords = True)
     #my_analyzer = CountVectorizer().build_analyzer()
     my_vectorizer = CountVectorizer(stop_words = stop,
-                                    ngram_range = (min_ngram, max_ngram),
-                                    max_df = max_df,
+                                    ngram_range = (min_ngram, max_ngram), max_df = max_df,
                                     min_df = min_df,
                                     max_features = max_features)
                                     #analyzer = stemming)
     my_doc_term = my_vectorizer.fit_transform(df[col])
+    print(my_doc_term.shape)
     if tfidf:
         tfidf_trans = TfidfTransformer(smooth_idf = smooth_idf, sublinear_tf = idf_log)
         my_doc_term = tfidf_trans.fit_transform(my_doc_term)
     return my_doc_term
 
+def one_hot(df, col):
+    enc = OneHotEncoder()
+    my_matrix = enc.fit_transform(df[col].astype('category').cat.codes.to_frame())
+    print(my_matrix.shape)
+    return my_matrix
 
-
-
+def multilabel(df, col, char_split = None):
+    mlb = MultiLabelBinarizer(sparse_output = True)
+    if char_split:
+        df[col] = df[col].str.split(char_split)
+    my_matrix = mlb.fit_transform(df[col])
+    print(my_matrix.shape)
+    return my_matrix
 
 ##########
 ## Main ##
@@ -259,7 +271,8 @@ print("End name preprocessing : " + str(datetime.datetime.now().time()))
 print("Begin brand name preprocessing : " + str(datetime.datetime.now().time()))
 if (NLP_STRAT == 'all_nlp') or (NLP_STRAT == 'nlp+'):
     #csc_brand = csc_from_col(whole, 'brand_name', r'\w+', MAX_BRAND_WORDS)
-    csc_brand = csc_from_col(whole, 'brand_name')
+    #csc_brand = csc_from_col(whole, 'brand_name')
+    csc_brand = one_hot(whole, 'brand_name')
 if NLP_STRAT != 'all_nlp':
     train_brand, test_brand = merge_EV(df_train, df_test, ['brand_name'])
     csc_brand_SI = csc_matrix(pd.concat([train_brand, test_brand]))
@@ -268,7 +281,8 @@ print("End brand name preprocessing : " + str(datetime.datetime.now().time()))
 print("Begin category preprocessing : " + str(datetime.datetime.now().time()))
 if (NLP_STRAT == 'all_nlp') or (NLP_STRAT == 'nlp+'):
     #csc_cat = csc_from_col(whole, 'category_name', r'(?:[^/]|//)+', MAX_CAT_WORDS)
-    csc_cat = csc_from_col(whole, 'category_name')
+    #csc_cat = csc_from_col(whole, 'category_name')
+    csc_cat = multilabel(whole, 'category_name', '/')
 if NLP_STRAT != 'all_nlp':
     train_cat, test_cat = merge_EV(df_train, df_test, ['category_name'])
     csc_cat_SI = csc_matrix(pd.concat([train_cat, test_cat]))
@@ -297,7 +311,7 @@ estimator = None
 #estimator = AdaBoostRegressor()
 #estimator = BaggingRegressor(n_estimators=10,n_jobs=-1,verbose=True)
 #estimator = GradientBoostingRegressor(n_estimators=20, verbose=1)
-estimator = Ridge(solver="sag", fit_intercept=True, random_state=145, alpha = 3)
+estimator = Ridge(solver="sag", fit_intercept=True, random_state=145, alpha = 2)
 #estimator = SGDRegressor()
 #estimator = Lasso()
 #estimator = ElasticNet()
