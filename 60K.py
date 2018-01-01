@@ -14,7 +14,7 @@ import re
 #import sys
 
 ## scipy
-from scipy.sparse import csc_matrix, hstack
+from scipy.sparse import csc_matrix, csr_matrix, hstack
 
 ## sklearn
 from sklearn.model_selection import train_test_split
@@ -194,7 +194,7 @@ print("Finished PrePreprocessing : " + str(datetime.datetime.now().time()))
 # Preprocessing
 print("Begin Preprocessing : " + str(datetime.datetime.now().time()))
 whole = pd.concat([df_train, df_test])
-csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship_cond, csc_has_brand, csc_has_cat, csc_has_desc = None, None, None, None, None, None, None, None, None, None
+csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship, csc_cond, csc_has_brand, csc_has_cat, csc_has_desc = None, None, None, None, None, None, None, None, None, None, None
 
 ## Column creation and na fill
 ### ez ops
@@ -203,9 +203,9 @@ fill_na_fast(whole, ['item_description','name'])
 whole['has_brand'] = pd.notnull(whole['brand_name']).apply(int)
 whole['has_cat'] = pd.notnull(whole['category_name']).apply(int)
 whole['has_desc'] = has_desc(whole).apply(int)
-csc_has_brand = csc_matrix(whole['has_brand'])
-csc_has_cat = csc_matrix(whole['has_cat'])
-csc_has_desc = csc_matrix(whole['has_desc'])
+csc_has_brand = csc_matrix(whole['has_brand']).transpose()
+csc_has_cat = csc_matrix(whole['has_cat']).transpose()
+csc_has_desc = csc_matrix(whole['has_desc']).transpose()
 # To do : check name
 
 ### Brand name fill (to refactor with a function)
@@ -258,12 +258,13 @@ if NLP_STRAT != 'all_nlp':
 print("End category preprocessing : " + str(datetime.datetime.now().time()))
 
 print("Begin shipping and condition preprocessing : " + str(datetime.datetime.now().time()))
-csc_ship_cond = csc_matrix(pd.get_dummies(whole[['shipping', 'item_condition_id']], sparse = True))
+csc_ship = csc_matrix(whole['shipping']).transpose()
+csc_cond = csc_matrix(pd.get_dummies(whole['item_condition_id'], sparse = True))
 #csc_ship_cond = whole[['shipping','item_condition_id']]
 print("End shipping and condition preprocessing : " + str(datetime.datetime.now().time()))
 
 ## Final csc
-csc_final = hstack((csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship_cond, csc_has_brand, csc_has_cat, csc_has_desc))
+csc_final = hstack((csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship, csc_cond, csc_has_brand, csc_has_cat, csc_has_desc))
 print("csc_final shape : " + str(csc_final.shape))
 #print("csc_final non zero : " + str(csc_final.count_nonzero()))
 #print("csc_final sparsity : " + str(csc_final.count_nonzero()/(csc_final.shape[0]*csc_final.shape[1])))
