@@ -1,42 +1,33 @@
 #!/usr/bin/python3
 
 # Imports
+
 ## del warnings
 import warnings
-import datetime
-import gc
 warnings.filterwarnings("ignore")
+
 ## basics
 import pandas as pd
 import numpy as np
+import datetime
+import re
+#import sys
+
+## scipy
 from scipy.sparse import csc_matrix, hstack
+
 ## sklearn
-#from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import train_test_split
-#from sklearn.ensemble import IsolationForest
-#from sklearn.ensemble import RandomForestRegressor
-#from sklearn.ensemble import ExtraTreesRegressor
-#from sklearn.ensemble import AdaBoostRegressor
-#from sklearn.ensemble import BaggingRegressor
-#from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.linear_model import Ridge
-from sklearn.linear_model import SGDRegressor
-#from sklearn.linear_model import Lasso
-#from sklearn.linear_model import ElasticNet
-#from sklearn.svm import SVR
-#from sklearn.svm import NuSVR
-## nltk
-from nltk.corpus import stopwords
-from nltk.tokenize import RegexpTokenizer
-#from nltk.stem.porter import PorterStemmer
-from nltk.stem.snowball import SnowballStemmer
-from joblib import Parallel, delayed
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
 from sklearn.preprocessing import OneHotEncoder, MultiLabelBinarizer, RobustScaler
-#from collections import Counter
-#import re
-from gensim import corpora, models, matutils
-from random import sample
+
+## nltk
+from nltk.corpus import stopwords
+#from nltk.stem.snowball import SnowballStemmer
+
+## multiprocessing
+from multiprocessing import cpu_count, Pool
 
 # run sur train split ou sur test pour submit
 SUB = False
@@ -44,14 +35,10 @@ SUB = False
 # Strat
 NLP_STRAT = 'all_nlp'     # 'no_nlp' 'mix_nlp' 'all_nlp' 'nlp+'
 
-# Constants
-#MAX_DESC_WORDS = 100000  # Completly random...
-#MAX_NAME_WORDS = 20000   # Completly random...
-#MAX_BRAND_WORDS = 5000   # Completly random...
-#MAX_CAT_WORDS = 5000     # Completly random...
-#LAMBDA_K = 10            # tune EV weighted function
-#LAMBDA_F = 1             #          //
-#FUNC = 'mean'          # function to use in high-level categorical features processing
+# Multiproc number
+cores = 3
+
+# English stop words
 stop = set(stopwords.words('english'))
 more_stop = ['i\'d', 'i\'m', 'i\'ll', ';)', '***', '**', ':)', '(:', '(;',
         ':-)', '//']
@@ -126,73 +113,8 @@ def merge_EV(train, test, cats, keep_all=False):
     else:
         return train[all_cats], test[all_cats]
  
-# For parallel
-#def get_tokens(i,regex):
-#    #stem_mono_tokens = Parallel(n_jobs=4)(delayed(p_stemmer.stem)(j) for j in i if j not in stop)
-#    p_stemmer = PorterStemmer()
-#    tokenizer = RegexpTokenizer(regex)
-#    stem_mono_tokens = [p_stemmer.stem(j) for j in tokenizer.tokenize(i.lower()) if j not in stop]
-#    return [' '.join(i) for i in zip(stem_mono_tokens, stem_mono_tokens[1:])] + stem_mono_tokens
-
-#def build_corpus(i,regex):
-#    #stem_mono_tokens = Parallel(n_jobs=4)(delayed(p_stemmer.stem)(j) for j in i if j not in stop)
-#    p_stemmer = PorterStemmer()
-#    tokenizer = RegexpTokenizer(regex)
-#    stem_mono_tokens = [p_stemmer.stem(j) for j in tokenizer.tokenize(i.lower()) if j not in stop]
-#    stem_tokens = [' '.join(i) for i in zip(stem_mono_tokens, stem_mono_tokens[1:])] + stem_mono_tokens
-#    return corpora.hashdictionary.HashDictionary(stem_tokens, id_range = 20000000).doc2bow(stem_tokens)
-
-#def my_dic_merge(dic_list):
-#    dic_len = len(dic_list[0])
-#    a = dic_list[0]
-#    for b in dic_list[1:]:
-#        for k in b.token2id:
-#            if k not in set(a.token2id):
-#                a.token2id[k] = dic_len
-#                dic_len += 1
-#
-#    return a
-
-## corpus2csc
-#def csc_from_col(df, col, regex, max_voc, tfidf = False): # Only Monograms for now
-#    #chunk_num = 3
-#    #p_stemmer = PorterStemmer()
-#    #tokenizer = RegexpTokenizer(regex)
-#    #print("gettokens start : " + str(datetime.datetime.now().time()))
-#    #stem_tokens = Parallel(n_jobs=3)(delayed(get_tokens)(i, regex) for i in list(df[col]))
-#    #print("gettokens end start dictionary: " + str(datetime.datetime.now().time()))
-#    #stem_tokens = [get_tokens(tokenizer.tokenize(i.lower())) for i in list(df[col])]
-#    #for i in list(df[col]):
-#    #    stem_mono_tokens = [p_stemmer.stem(j) for j in tokenizer.tokenize(i.lower()) if j not in stop]
-#    #    stem_tokens.append([' '.join(i) for i in zip(stem_mono_tokens, stem_mono_tokens[1:])] + stem_mono_tokens)
-#    #raw_tokens =tokenizer.tokenize(i.lower()) for i in list(df[col])]
-#    #stopped_tokens = [[i for i in token if i not in stop] for token in raw_tokens]
-#    #stem_mono_tokens = [[p_stemmer.stem(i) for i in token] for token in stopped_tokens]
-#    #stem_tokens = [[' '.join(i) for i in zip(tokens, tokens[1:])] + tokens for tokens in stem_mono_tokens]
-#    #gc.collect()
-#    #tok_chunk = [stem_tokens[i::chunk_num] for i in range(chunk_num)]
-#    #dictionary = corpora.hashdictionary.HashDictionary(stem_tokens)
-#    #dictionaries = Parallel(n_jobs=3)(delayed(corpora.Dictionary)(tok) for tok in tok_chunk)
-#    #print("dictionary end start dictionary_merge: " + str(datetime.datetime.now().time()))
-#    #dictionary = my_dic_merge(dictionaries)
-#    #print("dictionary_merge end start dictionary_filter: " + str(datetime.datetime.now().time()))
-#    #dictionary.filter_extremes(keep_n = max_voc)
-#    print("dictionary_filter end start corpus: " + str(datetime.datetime.now().time()))
-#    #corpus = [hashdictionary.HashDictionary(text).doc2bow(text) for text in stem_tokens]
-#    corpus = Parallel(n_jobs = 3)(delayed(build_corpus)(i, regex) for i in list(df[col]))
-#    if tfidf:
-#        tfidf = models.TfidfModel(corpus)
-#        tfidf_corpus = tfidf[corpus]
-#        print("corpus end start return: " + str(datetime.datetime.now().time()))
-#        my_csc_matrix = matutils.corpus2csc(tfidf_corpus).transpose()
-#    else:
-#        print("corpus end start return: " + str(datetime.datetime.now().time()))
-#        my_csc_matrix = matutils.corpus2csc(corpus).transpose()
-#    return my_csc_matrix
-
 # corpus2csc
 def csc_from_col(df, col, tfidf = True, min_ngram = 1, max_ngram = 3, max_df = 1.0, min_df = 1, max_features = 2000000, idf_log = False, smooth_idf = True):
-#def csc_from_col(df, col, tfidf = True, min_ngram = 1, max_ngram = 1, max_df = 1.0, min_df = 1, max_features = 20000000, idf_log = False, smooth_idf = True):
 
     #def stemming(doc):
     #    return (my_stemmer.stem(w) for w in my_analyzer(doc))
@@ -225,6 +147,26 @@ def multilabel(df, col, char_split = None):
     print(my_matrix.shape)
     return my_matrix
 
+def parallelize(func, data, col, arg):
+    data_split = np.array_split(data, cores) 
+    pool = Pool(cores)
+    data = [pool.apply_async(func, args = (df, col, arg)) for df in data_split]
+    data = pd.concat([d.get() for d in data])
+    pool.close()
+    pool.join()
+    return data
+
+def str_extract(string, str_list):
+    match = re.search(str_list, string, flags=re.IGNORECASE)
+    extr = match.group(0) if match else np.nan
+    return extr
+
+def brand_extract(df, col, str_list):
+    return df[col].map(lambda x : str_extract(x, str_list))
+
+def has_desc(df):
+    return df['item_description'].apply(lambda x : x != 'No description yet' and x != 'missing_item_description')
+
 ##########
 ## Main ##
 ##########
@@ -236,17 +178,10 @@ print("Read and PrePreprocessing : " + str(datetime.datetime.now().time()))
 df_train = pd.read_table('../input/train.tsv', index_col = 0)            
 df_train = df_train[df_train['price'] != 0]                    # drop price == 0$
 df_train['price'] = np.log(df_train['price']+1)                # Price -> Log
-df_train['has_brand'] = pd.notnull(df_train['brand_name']).apply(int)
-
-fill_na_fast(df_train, ['item_description','name'])
-fill_na_unique(df_train, ['category_name','brand_name'])
 
 ## Read test
 if SUB:
   df_test = pd.read_table('../input/test.tsv', index_col = 0)
-  df_test['has_brand'] = pd.notnull(df_test['brand_name']).apply(int)
-  fill_na_fast(df_test, ['item_description','name'])
-  fill_na_fast(df_test, ['category_name','brand_name'])
   
 else:
   df_train, df_test = train_test_split(df_train, test_size=0.3)
@@ -256,21 +191,50 @@ split_index = len(df_train)
 print("Finished PrePreprocessing : " + str(datetime.datetime.now().time()))
 ####################################
 
-# Preprocessing categorical columns
+# Preprocessing
 print("Begin Preprocessing : " + str(datetime.datetime.now().time()))
 whole = pd.concat([df_train, df_test])
-csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship_cond = None, None, None, None, None, None, None
+csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship_cond, csc_has_brand, csc_has_cat, csc_has_desc = None, None, None, None, None, None, None, None, None, None
 
+## Column creation and na fill
+### ez ops
+print("Begin column creation and na fill : " + str(datetime.datetime.now().time()))
+fill_na_fast(whole, ['item_description','name'])
+whole['has_brand'] = pd.notnull(whole['brand_name']).apply(int)
+whole['has_cat'] = pd.notnull(whole['category_name']).apply(int)
+whole['has_desc'] = has_desc(whole).apply(int)
+csc_has_brand = csc_matrix(whole['has_brand'])
+csc_has_cat = csc_matrix(whole['has_cat'])
+csc_has_desc = csc_matrix(whole['has_desc'])
+# To do : check name
+
+### Brand name fill (to refactor with a function)
+brands_list = sorted(whole['brand_name'][whole['brand_name'].notnull()].unique(), key = len, reverse = True)
+brands_list = "\\b("+"|".join([re.escape(m) for m in brands_list])+")\\b"
+print("Start fill brand : " + str(datetime.datetime.now().time()))
+brands_from_name = parallelize(brand_extract, whole['name'][whole['brand_name'].isnull()].to_frame(), 'name', brands_list)
+whole['brand_name'].fillna(brands_from_name, inplace=True)
+print("End fill brand from name: " + str(datetime.datetime.now().time()))
+brands_from_desc = parallelize(brand_extract, whole['item_description'][whole['brand_name'].isnull()].to_frame(), 'item_description', brands_list)
+whole['brand_name'].fillna(brands_from_desc, inplace=True)
+print("End fill brand from item_description: " + str(datetime.datetime.now().time()))
+print(whole.count())
+
+### last fills
+fill_na_unique(whole, ['category_name','brand_name'])
+print("End column creation and na fill : " + str(datetime.datetime.now().time()))
+
+## Preprocessing categorical columns
 print("Begin description preprocessing : " + str(datetime.datetime.now().time()))
 if NLP_STRAT != 'no_nlp':
     #csc_desc = csc_from_col(whole, 'item_description', r'\w+', MAX_DESC_WORDS, tfidf = True)
-    csc_desc = csc_from_col(whole, 'item_description', idf_log = True)
+    csc_desc = csc_from_col(whole, 'item_description')
 print("End description preprocessing : " + str(datetime.datetime.now().time()))
     
 print("Begin name preprocessing : " + str(datetime.datetime.now().time()))
 if NLP_STRAT != 'no_nlp':
     #csc_name = csc_from_col(whole, 'name', r'\w+', MAX_NAME_WORDS)
-    csc_name = csc_from_col(whole, 'name', idf_log = True)
+    csc_name = csc_from_col(whole, 'name')
 print("End name preprocessing : " + str(datetime.datetime.now().time()))
     
 print("Begin brand name preprocessing : " + str(datetime.datetime.now().time()))
@@ -299,8 +263,7 @@ csc_ship_cond = csc_matrix(pd.get_dummies(whole[['shipping', 'item_condition_id'
 print("End shipping and condition preprocessing : " + str(datetime.datetime.now().time()))
 
 ## Final csc
-csc_final = hstack((csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship_cond))
-
+csc_final = hstack((csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship_cond, csc_has_brand, csc_has_cat, csc_has_desc))
 print("csc_final shape : " + str(csc_final.shape))
 #print("csc_final non zero : " + str(csc_final.count_nonzero()))
 #print("csc_final sparsity : " + str(csc_final.count_nonzero()/(csc_final.shape[0]*csc_final.shape[1])))
@@ -308,6 +271,7 @@ csc_train = csc_final.tocsr()[:split_index]
 csc_test = csc_final.tocsr()[split_index:]
 print("End Preprocessing : " + str(datetime.datetime.now().time()))
 ######################################
+
 
 ### Regression ###
 estimator = None
@@ -329,7 +293,7 @@ estimator.fit(csc_train, df_train.price)
 if not SUB:
    df_test['predicted'] = estimator.predict(csc_test)
    df_test['predicted'] = np.exp(df_test['predicted'])-1
-   df_test['predicted'][df_test['predicted']<3] = 3
+   df_test['predicted'][df_test['predicted'] < 3] = 3
    df_test['predicted'] = np.log(df_test['predicted']+1)
    df_test['eval'] = (df_test['predicted'] - df_test['price'])**2
    eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
