@@ -52,6 +52,7 @@ NLP_CAT_UNSPLIT = True
 NLP_BRAND = True
 NAME_LEN = True
 DESC_LEN = True
+DESC_LEN_POLY = True
 MULTILAB_CAT = True
 SHIPPING = True
 CONDITION = True
@@ -236,14 +237,15 @@ def tokenize(df, columns, stop_w = None):
         columns = [columns]
     vectorizer = CountVectorizer(stop_words = stop_w)
     new_cols = []
-    for col in new_cols:
+    for col in columns:
         new_cols.append(col+'_token')
         df[col+'_token'] = df[col].apply(vectorizer.build_analyzer())
     return new_cols
 
 ###
-def word_count(df, col, name):
+def word_count(df, col, name, func = lambda x: x):
     df[name] = df[col].apply(len)
+    df[name] = df[name].apply(func)
     df[name] = RobustScaler().fit_transform(df[name].to_frame())
     return csc_matrix(df[name]).transpose()
 
@@ -279,8 +281,6 @@ whole = pd.concat([df_train, df_test])
 print("Begin standardization : " + str(datetime.datetime.now().time()))
 no_desc_to_nan(whole, 'item_description', 'No description yet')
 whole = whole.applymap(lambda x: x if type(x)!=str else x.lower())
-feature_token = tokenize(whole, ['name','item_description'])
-cats_list = split_col(whole, 'category_name', delim = '/')
 print("End standardization : " + str(datetime.datetime.now().time()))
 
 csc_m_list=[]
@@ -298,8 +298,10 @@ if HAS_CAT:
 print("End feature creation : " + str(datetime.datetime.now().time()))
 
 ### Fill NaNs 1
-fill_na_fast(whole, ['item_description','name','category_name']+cats_list)
-
+fill_na_fast(whole, ['item_description','name'])
+feature_token = tokenize(whole, ['name','item_description'])
+cats_list = split_col(whole, 'category_name', delim = '/')
+fill_na_fast(whole, ['category_name']+cats_list)
 ### Extract some missing brand names
 print("Start extracting brand names : " + str(datetime.datetime.now().time()))
 brands_list = sorted(whole['brand_name'][whole['brand_name'].notnull()].unique(), key = len, reverse = True)
@@ -330,10 +332,11 @@ print("End NLP Stuff : " + str(datetime.datetime.now().time()))
   
 ### Length Features
 if NAME_LEN:
-    csc_m_list.append(word_count(whole, 'name', 'name_len'))
+    csc_m_list.append(word_count(whole, 'name_token', 'name_len'))
 if DESC_LEN:
-    csc_m_list.append(word_count(whole, 'item_description', 'desc_len'))
-
+    csc_m_list.append(word_count(whole, 'item_description_token', 'desc_len'))
+if DESC_LEN_POLY:
+	csc_m_list.append(word_count(whole, 'item_description_token', 'desc_len', lambda x: x^2))
 ### Dummies
 print("Begin shipping and condition processing : " + str(datetime.datetime.now().time()))
 if SHIPPING:
@@ -361,7 +364,7 @@ print("End Preprocessing : " + str(datetime.datetime.now().time()))
 #estimator = AdaBoostRegressor()
 #estimator = BaggingRegressor(n_estimators=10,n_jobs=-1,verbose=True)
 #estimator = GradientBoostingRegressor(n_estimators=20, verbose=1)
-estimator = Ridge(solver="sag", fit_intercept=True, random_state=RAND, alpha = 1)
+estimator = Ridge(solver="sag", fit_intercept=True, random_state=RAND, alpha = 2)
 #estimator = HuberRegressor(epsilon=1.35, max_iter=100, alpha=0.0001, warm_start=False, fit_intercept=True, tol=1e-05)
 #estimator = SGDRegressor(loss=’squared_loss’, penalty=’l2’, alpha=0.0001, l1_ratio=0.15, max_iter=5, tol=None, shuffle=True, epsilon=0.1, random_state=RAND, learning_rate=’invscaling’, eta0=0.01, power_t=0.25)
 #estimator = Lasso()
