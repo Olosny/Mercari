@@ -176,12 +176,15 @@ print("Read and PrePreprocessing : " + str(datetime.datetime.now().time()))
 
 ## Read train
 df_train = pd.read_table('../input/train.tsv', index_col = 0)            
+sup_index_train = len(df_train)
 df_train = df_train[df_train['price'] != 0]                    # drop price == 0$
 df_train['price'] = np.log(df_train['price']+1)                # Price -> Log
 
 ## Read test
 if SUB:
   df_test = pd.read_table('../input/test.tsv', index_col = 0)
+  df_test.index = df_test.index + sup_index_train
+
   
 else:
   df_train, df_test = train_test_split(df_train, test_size=0.3)
@@ -201,11 +204,11 @@ csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship, csc_
 print("Begin column creation and na fill : " + str(datetime.datetime.now().time()))
 fill_na_fast(whole, ['item_description','name'])
 whole['has_brand'] = pd.notnull(whole['brand_name']).apply(int)
-whole['has_cat'] = pd.notnull(whole['category_name']).apply(int)
-whole['has_desc'] = has_desc(whole).apply(int)
+#whole['has_cat'] = pd.notnull(whole['category_name']).apply(int)
+#whole['has_desc'] = has_desc(whole).apply(int)
 csc_has_brand = csc_matrix(whole['has_brand']).transpose()
-csc_has_cat = csc_matrix(whole['has_cat']).transpose()
-csc_has_desc = csc_matrix(whole['has_desc']).transpose()
+#csc_has_cat = csc_matrix(whole['has_cat']).transpose()
+#csc_has_desc = csc_matrix(whole['has_desc']).transpose()
 # To do : check name
 
 ### Brand name fill (to refactor with a function)
@@ -300,7 +303,7 @@ if not SUB:
    eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
    print("score: ", eval1)
 else:
-   df_sub = pd.DataFrame({'test_id':df_test.index})
+   df_sub = pd.DataFrame({'test_id' : df_test.index - sup_index_train})
    df_sub['price'] = np.exp(estimator.predict(csc_test))-1
    df_sub['price'][df_sub['price'] < 3] = 3
    df_sub.to_csv('submission.csv',index=False)
