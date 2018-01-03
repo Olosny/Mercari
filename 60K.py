@@ -1,15 +1,17 @@
 #!/usr/bin/python3
 
-# Imports
+#############
+## Imports ##
+#############
 
-## del warnings
+## Obs
+import datetime
 import warnings
 warnings.filterwarnings("ignore")
 
 ## basics
 import pandas as pd
 import numpy as np
-import datetime
 import re
 #import sys
 
@@ -18,10 +20,11 @@ from scipy.sparse import csc_matrix, csr_matrix, hstack
 
 ## sklearn
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import Ridge, SGDRegressor, HuberRegressor
+#from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
-from sklearn.preprocessing import OneHotEncoder, MultiLabelBinarizer, RobustScaler
-
+from sklearn.preprocessing import OneHotEncoder, MultiLabelBinarizer
+from sklearn.preprocessing import MaxAbsScaler, RobustScaler, QuantileTransformer
 ## nltk
 from nltk.corpus import stopwords
 #from nltk.stem.snowball import SnowballStemmer
@@ -29,48 +32,108 @@ from nltk.corpus import stopwords
 ## multiprocessing
 from multiprocessing import cpu_count, Pool
 
-# run sur train split ou sur test pour submit
+
+################
+## Parameters ##
+################
+
+## run sur train split ou sur test pour submit
 SUB = False
 
-# Strat
-NLP_STRAT = 'all_nlp'     # 'no_nlp' 'mix_nlp' 'all_nlp' 'nlp+'
+## Strat
+HAS_BRAND = True
+HAS_DESC = True
+HAS_CAT = True
+HAS_BRAND_NOW = True
+NLP_DESC = True
+NLP_NAME = True
+NLP_CAT_SPLIT = True
+NLP_CAT_UNSPLIT = True
+NLP_BRAND = True
+NAME_LEN = True
+DESC_LEN = True
+MULTILAB_CAT = True
+SHIPPING = True
+CONDITION = True
 
-# Multiproc number
-cores = 3
 
-# English stop words
+## Random state
+RAND = 0                 # 'None', int...
+
+## Multiproc number
+N_CORES = 3
+
+## SIGKDD
+LAMBDA_K = 10            # tune EV weighted function
+LAMBDA_F = 1             #          //
+FUNC = 'mean'            # function to use in high-level categorical features processing
+
+## English stop words
 stop = set(stopwords.words('english'))
-more_stop = ['i\'d', 'i\'m', 'i\'ll', ';)', '***', '**', ':)', '(:', '(;',
-        ':-)', '//']
+more_stop = ['i\'d', 'i\'m', 'i\'ll', ';)', '***', '**', ':)', '(:', '(;', ':-)', '//']
 
 for i in more_stop:
     stop.add(i)
 
+	
 ###############
 ## Functions ##
 ###############
 
-## fast fill nans. columns must be a list
+## Filling NaNs ---------------------------------------------------------------
+### fast fill nans
 def fill_na_fast(df, columns):
+    if isinstance(columns, str):
+        columns = [columns]
     for col in columns:
         df[col].fillna(value = 'missing_'+col, inplace = True)
 
-## fill nans with unique values. columns must be a list
+### fill nans with unique values
 def fill_na_unique(df, columns):
+    if isinstance(columns, str):
+        columns = [columns]
     n_col = len(columns)
     n_nan = [df[columns[i]][pd.isnull(df[columns[i]])].size for i in range(n_col)]
     fill_with = [[columns[i]+'_'+str(k) for k in range(n_nan[i])] for i in range(n_col)]
     for i in range(n_col):
         df[columns[i]][pd.isnull(df[columns[i]])] = fill_with[i]
+
+### find if an element of 'str_list' is in 'string'
+def str_extract(string, str_list):
+    match = re.search(str_list, string, flags=re.IGNORECASE)
+    extr = match.group(0) if match else np.nan
+    return extr	
+
+### 
+def feature_extract(df, col, str_list):
+    return df[col].map(lambda x : str_extract(x, str_list))
+
+###
+def fill_from_extr(df, col_to_fill, col_extr, str_list):
+    from_col = parallelize(feature_extract, df[col_extr][df[col_to_fill].isnull()].to_frame(), col_extr, str_list)
+    df[col_to_fill].fillna(from_col, inplace=True)
+
+
+## Parallelization ------------------------------------------------------------
+### parallelize
+def parallelize(func, data, col, arg):
+    data_split = np.array_split(data, N_CORES) 
+    pool = Pool(N_CORES)
+    data = [pool.apply_async(func, args = (df, col, arg)) for df in data_split]
+    data = pd.concat([d.get() for d in data])
+    pool.close()
+    pool.join()
+    return data
     
-## weighted EV
+## SIGKDD ---------------------------------------------------------------------
+### weighted EV
 def ev_cat(n, ev_loc, ev_glob):
     k = LAMBDA_K
     f = LAMBDA_F
     lamb = (1 / (1 + np.exp(- (n - k) / f)))
     return (lamb * ev_loc + (1 - lamb) * ev_glob)
 
-## Compute 'new' : EV from Categorical column(s) 'cats', weighted by 'prev'
+### Compute 'new' : EV from Categorical column(s) 'cats', weighted by 'prev'
 def cat_to_EV(df, cats, prev, new):
     df['tmp_size']=df.groupby(cats)['price'].transform('size')
     df['tmp_func']=df.groupby(cats)['price'].transform(FUNC)
@@ -80,8 +143,10 @@ def cat_to_EV(df, cats, prev, new):
         df[new]=ev_cat(df['tmp_size'],df['tmp_func'],prev)
     df.drop(['tmp_size','tmp_func'], axis=1, inplace = True)
 
-## EV column from 'cats' to train and merge it with test. cats must be a list
+### EV column from 'cats' to train and merge it with test. cats must be a list
 def merge_EV(train, test, cats, keep_all=False):
+    if isinstance(cats,str):
+        cats = [cats]
     ev_price_tot = train['price'].agg(FUNC)
     n_cats = len(cats)
     new = cats[0]+'_EV'
@@ -113,8 +178,11 @@ def merge_EV(train, test, cats, keep_all=False):
     else:
         return train[all_cats], test[all_cats]
  
-# corpus2csc
+## NLP ------------------------------------------------------------------------
+### corpus2csc
 def csc_from_col(df, col, tfidf = True, min_ngram = 1, max_ngram = 3, max_df = 1.0, min_df = 1, max_features = 2000000, idf_log = False, smooth_idf = True):
+#def csc_from_col(df, col, tfidf = True, min_ngram = 1, max_ngram = 1, max_df = 1.0, min_df = 1, max_features = 20000000, idf_log = False, smooth_idf = True):
+    print("Begin "+col+" NLP : " + str(datetime.datetime.now().time()))
 
     #def stemming(doc):
     #    return (my_stemmer.stem(w) for w in my_analyzer(doc))
@@ -122,167 +190,180 @@ def csc_from_col(df, col, tfidf = True, min_ngram = 1, max_ngram = 3, max_df = 1
     #my_stemmer = SnowballStemmer('english', ignore_stopwords = True)
     #my_analyzer = CountVectorizer().build_analyzer()
     my_vectorizer = CountVectorizer(stop_words = stop,
-                                    ngram_range = (min_ngram, max_ngram), max_df = max_df,
+                                    ngram_range = (min_ngram, max_ngram),
+                                    max_df = max_df,
                                     min_df = min_df,
                                     max_features = max_features)
                                     #analyzer = stemming)
     my_doc_term = my_vectorizer.fit_transform(df[col])
-    print(my_doc_term.shape)
     if tfidf:
         tfidf_trans = TfidfTransformer(smooth_idf = smooth_idf, sublinear_tf = idf_log)
         my_doc_term = tfidf_trans.fit_transform(my_doc_term)
+    print("End "+col+" NLP : " + str(datetime.datetime.now().time()))
     return my_doc_term
 
-def one_hot(df, col):
-    enc = OneHotEncoder()
-    my_matrix = enc.fit_transform(df[col].astype('category').cat.codes.to_frame())
-    print(my_matrix.shape)
-    return my_matrix
-
+## ??? ------------------------------------------------------------------------
+###
 def multilabel(df, col, char_split = None):
     mlb = MultiLabelBinarizer(sparse_output = True)
     if char_split:
         df[col] = df[col].str.split(char_split)
     my_matrix = mlb.fit_transform(df[col])
-    print(my_matrix.shape)
     return my_matrix
 
-def parallelize(func, data, col, arg):
-    data_split = np.array_split(data, cores) 
-    pool = Pool(cores)
-    data = [pool.apply_async(func, args = (df, col, arg)) for df in data_split]
-    data = pd.concat([d.get() for d in data])
-    pool.close()
-    pool.join()
-    return data
+### Split column 'col' using delimiter 'delim'
+def split_col(df, col, delim = None):
+    new_cols = df[col].str.split(delim, expand = True)
+    new_cols_names = [col+'_'+str(i) for i in range(new_cols.shape[1])]
+    dictionary = dict(zip(new_cols.columns, new_cols_names))
+    new_cols.rename(columns = dictionary, inplace = True)
+    df[new_cols_names] = new_cols
+    return new_cols_names
 
-def str_extract(string, str_list):
-    match = re.search(str_list, string, flags=re.IGNORECASE)
-    extr = match.group(0) if match else np.nan
-    return extr
 
-def brand_extract(df, col, str_list):
-    return df[col].map(lambda x : str_extract(x, str_list))
+###
+def has_feature(df, col, name):
+    df[name] = pd.notnull(df[col]).apply(int)
+    return csc_matrix(df[name]).transpose()
 
-def has_desc(df):
-    return df['item_description'].apply(lambda x : x != 'No description yet' and x != 'missing_item_description')
+###
+def no_desc_to_nan(df,col,str):
+    df[col].apply(lambda x : np.nan if x == str else x)
+
+###
+def tokenize(df, columns, stop_w = None):
+    if isinstance(columns, str):
+        columns = [columns]
+    vectorizer = CountVectorizer(stop_words = stop_w)
+    new_cols = []
+    for col in new_cols:
+        new_cols.append(col+'_token')
+        df[col+'_token'] = df[col].apply(vectorizer.build_analyzer())
+    return new_cols
+
+###
+def word_count(df, col, name):
+    df[name] = df[col].apply(len)
+    df[name] = RobustScaler().fit_transform(df[name].to_frame())
+    return csc_matrix(df[name]).transpose()
+
+
 
 ##########
 ## Main ##
 ##########
 
-# Read and clean
-print("Read and PrePreprocessing : " + str(datetime.datetime.now().time()))
+## Read and clean -------------------------------------------------------------
+print("Read and Pre-Preprocessing : " + str(datetime.datetime.now().time()))
 
-## Read train
+### Read train
 df_train = pd.read_table('../input/train.tsv', index_col = 0)            
 df_train = df_train[df_train['price'] != 0]                    # drop price == 0$
-df_train['price'] = np.log(df_train['price']+1)                # Price -> Log
+df_train['price'] = np.log(df_train['price']+1)                # take log of price
 
-## Read test
+### Read test
 if SUB:
-  df_test = pd.read_table('../input/test.tsv', index_col = 0)
-  
-else:
-  df_train, df_test = train_test_split(df_train, test_size=0.3)
-
+    df_test = pd.read_table('../input/test.tsv', index_col = 0) 
+else:	
+    df_train, df_test = train_test_split(df_train, test_size=0.3, random_state=RAND)
 
 split_index = len(df_train) 
-print("Finished PrePreprocessing : " + str(datetime.datetime.now().time()))
-####################################
+print("Finished Pre-Preprocessing : " + str(datetime.datetime.now().time()))
 
-# Preprocessing
+
+## Preprocessing --------------------------------------------------------------
 print("Begin Preprocessing : " + str(datetime.datetime.now().time()))
 whole = pd.concat([df_train, df_test])
-csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship, csc_cond, csc_has_brand, csc_has_cat, csc_has_desc = None, None, None, None, None, None, None, None, None, None, None
 
-## Column creation and na fill
-### ez ops
-print("Begin column creation and na fill : " + str(datetime.datetime.now().time()))
-fill_na_fast(whole, ['item_description','name'])
-whole['has_brand'] = pd.notnull(whole['brand_name']).apply(int)
-whole['has_cat'] = pd.notnull(whole['category_name']).apply(int)
-whole['has_desc'] = has_desc(whole).apply(int)
-csc_has_brand = csc_matrix(whole['has_brand']).transpose()
-csc_has_cat = csc_matrix(whole['has_cat']).transpose()
-csc_has_desc = csc_matrix(whole['has_desc']).transpose()
+### Standardize text and Nans
+print("Begin standardization : " + str(datetime.datetime.now().time()))
+no_desc_to_nan(whole, 'item_description', 'No description yet')
+whole = whole.applymap(lambda x: x if type(x)!=str else x.lower())
+feature_token = tokenize(whole, ['name','item_description'])
+cats_list = split_col(whole, 'category_name', delim = '/')
+print("End standardization : " + str(datetime.datetime.now().time()))
+
+csc_m_list=[]
+
+### Feature creation
+print("Begin feature creation : " + str(datetime.datetime.now().time()))
+if HAS_BRAND:
+    csc_m_list.append(has_feature(whole, 'brand_name', 'has_brand'))
+if HAS_DESC:
+    csc_m_list.append(has_feature(whole, 'item_description', 'has_item_description'))
+if HAS_CAT:
+    csc_m_list.append(has_feature(whole, 'category_name', 'has_category_name'))
+
 # To do : check name
+print("End feature creation : " + str(datetime.datetime.now().time()))
 
-### Brand name fill (to refactor with a function)
+### Fill NaNs 1
+fill_na_fast(whole, ['item_description','name','category_name']+cats_list)
+
+### Extract some missing brand names
+print("Start extracting brand names : " + str(datetime.datetime.now().time()))
 brands_list = sorted(whole['brand_name'][whole['brand_name'].notnull()].unique(), key = len, reverse = True)
 brands_list = "\\b("+"|".join([re.escape(m) for m in brands_list])+")\\b"
-print("Start fill brand : " + str(datetime.datetime.now().time()))
-brands_from_name = parallelize(brand_extract, whole['name'][whole['brand_name'].isnull()].to_frame(), 'name', brands_list)
-whole['brand_name'].fillna(brands_from_name, inplace=True)
-print("End fill brand from name: " + str(datetime.datetime.now().time()))
-brands_from_desc = parallelize(brand_extract, whole['item_description'][whole['brand_name'].isnull()].to_frame(), 'item_description', brands_list)
-whole['brand_name'].fillna(brands_from_desc, inplace=True)
-print("End fill brand from item_description: " + str(datetime.datetime.now().time()))
-print(whole.count())
+fill_from_extr(whole, 'brand_name', 'name', brands_list)
+fill_from_extr(whole, 'brand_name', 'item_description', brands_list)
+if HAS_BRAND_NOW:
+    csc_m_list.append(has_feature(whole, 'brand_name', 'has_brand_now'))
+print("End extracting brand names : " + str(datetime.datetime.now().time()))
 
-### last fills
-fill_na_unique(whole, ['category_name','brand_name'])
-print("End column creation and na fill : " + str(datetime.datetime.now().time()))
+### Fill NaNs 2
+fill_na_fast(whole, ['brand_name'])
 
-## Preprocessing categorical columns
-print("Begin description preprocessing : " + str(datetime.datetime.now().time()))
-if NLP_STRAT != 'no_nlp':
-    #csc_desc = csc_from_col(whole, 'item_description', r'\w+', MAX_DESC_WORDS, tfidf = True)
-    csc_desc = csc_from_col(whole, 'item_description')
-print("End description preprocessing : " + str(datetime.datetime.now().time()))
-    
-print("Begin name preprocessing : " + str(datetime.datetime.now().time()))
-if NLP_STRAT != 'no_nlp':
-    #csc_name = csc_from_col(whole, 'name', r'\w+', MAX_NAME_WORDS)
-    csc_name = csc_from_col(whole, 'name')
-print("End name preprocessing : " + str(datetime.datetime.now().time()))
-    
-print("Begin brand name preprocessing : " + str(datetime.datetime.now().time()))
-if (NLP_STRAT == 'all_nlp') or (NLP_STRAT == 'nlp+'):
-    #csc_brand = csc_from_col(whole, 'brand_name', r'\w+', MAX_BRAND_WORDS)
-    #csc_brand = csc_from_col(whole, 'brand_name')
-    csc_brand = one_hot(whole, 'brand_name')
-if NLP_STRAT != 'all_nlp':
-    train_brand, test_brand = merge_EV(df_train, df_test, ['brand_name'])
-    csc_brand_SI = csc_matrix(pd.concat([train_brand, test_brand]))
-print("End brand name preprocessing : " + str(datetime.datetime.now().time()))
+### NLP
+print("Begin NLP Stuff : " + str(datetime.datetime.now().time()))
+if NLP_DESC:
+    csc_m_list.append(csc_from_col(whole, 'item_description'))
+if NLP_NAME:
+    csc_m_list.append(csc_from_col(whole, 'name'))
+if NLP_BRAND:
+    csc_m_list.append(csc_from_col(whole, 'brand_name'))
+if NLP_CAT_SPLIT:
+    for cat in cats_list:
+        csc_m_list.append(csc_from_col(whole, cat))
+if NLP_CAT_UNSPLIT:
+    csc_m_list.append(csc_from_col(whole, 'category_name'))
+print("End NLP Stuff : " + str(datetime.datetime.now().time()))
+  
+### Length Features
+if NAME_LEN:
+    csc_m_list.append(word_count(whole, 'name', 'name_len'))
+if DESC_LEN:
+    csc_m_list.append(word_count(whole, 'item_description', 'desc_len'))
 
-print("Begin category preprocessing : " + str(datetime.datetime.now().time()))
-if (NLP_STRAT == 'all_nlp') or (NLP_STRAT == 'nlp+'):
-    #csc_cat = csc_from_col(whole, 'category_name', r'(?:[^/]|//)+', MAX_CAT_WORDS)
-    #csc_cat = csc_from_col(whole, 'category_name')
-    csc_cat = multilabel(whole, 'category_name', '/')
-if NLP_STRAT != 'all_nlp':
-    train_cat, test_cat = merge_EV(df_train, df_test, ['category_name'])
-    csc_cat_SI = csc_matrix(pd.concat([train_cat, test_cat]))
-print("End category preprocessing : " + str(datetime.datetime.now().time()))
+### Dummies
+print("Begin shipping and condition processing : " + str(datetime.datetime.now().time()))
+if SHIPPING:
+    csc_m_list.append(csc_matrix(whole['shipping']).transpose())
+if CONDITION:
+    csc_m_list.append(csc_matrix(pd.get_dummies(whole['item_condition_id'], sparse = True)))
+if MULTILAB_CAT:
+    csc_m_list.append(multilabel(whole, 'category_name', '/'))
+print("End shipping and condition processing : " + str(datetime.datetime.now().time()))
 
-print("Begin shipping and condition preprocessing : " + str(datetime.datetime.now().time()))
-csc_ship = csc_matrix(whole['shipping']).transpose()
-csc_cond = csc_matrix(pd.get_dummies(whole['item_condition_id'], sparse = True))
-#csc_ship_cond = whole[['shipping','item_condition_id']]
-print("End shipping and condition preprocessing : " + str(datetime.datetime.now().time()))
-
-## Final csc
-csc_final = hstack((csc_desc, csc_name, csc_brand, csc_brand_SI, csc_cat, csc_cat_SI, csc_ship, csc_cond, csc_has_brand, csc_has_cat, csc_has_desc))
+## Final csc ..................................................................
+csc_final = hstack(csc_m_list)
 print("csc_final shape : " + str(csc_final.shape))
-#print("csc_final non zero : " + str(csc_final.count_nonzero()))
-#print("csc_final sparsity : " + str(csc_final.count_nonzero()/(csc_final.shape[0]*csc_final.shape[1])))
 csc_train = csc_final.tocsr()[:split_index]
 csc_test = csc_final.tocsr()[split_index:]
 print("End Preprocessing : " + str(datetime.datetime.now().time()))
-######################################
 
 
-### Regression ###
-estimator = None
+################
+## Regression ##
+################
+
 #estimator = RandomForestRegressor(n_estimators=20, n_jobs=-1,verbose=1)
 #estimator = ExtraTreesRegressor(n_estimators=20, n_jobs=-1,verbose=1)
 #estimator = AdaBoostRegressor()
 #estimator = BaggingRegressor(n_estimators=10,n_jobs=-1,verbose=True)
 #estimator = GradientBoostingRegressor(n_estimators=20, verbose=1)
-estimator = Ridge(solver="sag", fit_intercept=True, random_state=145, alpha = 2)
-#estimator = SGDRegressor()
+estimator = Ridge(solver="sag", fit_intercept=True, random_state=RAND, alpha = 1)
+#estimator = HuberRegressor(epsilon=1.35, max_iter=100, alpha=0.0001, warm_start=False, fit_intercept=True, tol=1e-05)
+#estimator = SGDRegressor(loss=’squared_loss’, penalty=’l2’, alpha=0.0001, l1_ratio=0.15, max_iter=5, tol=None, shuffle=True, epsilon=0.1, random_state=RAND, learning_rate=’invscaling’, eta0=0.01, power_t=0.25)
 #estimator = Lasso()
 #estimator = ElasticNet()
 #estimator = SVR(verbose=True)
@@ -292,15 +373,15 @@ print("params: ", estimator.get_params())
 estimator.fit(csc_train, df_train.price)
 
 if not SUB:
-   df_test['predicted'] = estimator.predict(csc_test)
-   df_test['predicted'] = np.exp(df_test['predicted'])-1
-   df_test['predicted'][df_test['predicted'] < 3] = 3
-   df_test['predicted'] = np.log(df_test['predicted']+1)
-   df_test['eval'] = (df_test['predicted'] - df_test['price'])**2
-   eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
-   print("score: ", eval1)
+    df_test['predicted'] = estimator.predict(csc_test)
+    df_test['predicted'] = np.exp(df_test['predicted'])-1
+    df_test['predicted'][df_test['predicted'] < 3] = 3
+    df_test['predicted'] = np.log(df_test['predicted']+1)
+    df_test['eval'] = (df_test['predicted'] - df_test['price'])**2
+    eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
+    print("score: ", eval1)
 else:
-   df_sub = pd.DataFrame({'test_id':df_test.index})
-   df_sub['price'] = np.exp(estimator.predict(csc_test))-1
-   df_sub['price'][df_sub['price'] < 3] = 3
-   df_sub.to_csv('submission.csv',index=False)
+    df_sub = pd.DataFrame({'test_id':df_test.index})
+    df_sub['price'] = np.exp(estimator.predict(csc_test).to_frame())-1
+    df_sub['price'][df_sub['price'] < 3] = 3
+    df_sub.to_csv('submission.csv',index=False)
