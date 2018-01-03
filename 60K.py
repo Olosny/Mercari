@@ -25,13 +25,13 @@ from sklearn.linear_model import Ridge, SGDRegressor, HuberRegressor
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
 from sklearn.preprocessing import OneHotEncoder, MultiLabelBinarizer
 from sklearn.preprocessing import MaxAbsScaler, RobustScaler, QuantileTransformer
+
 ## nltk
 from nltk.corpus import stopwords
 #from nltk.stem.snowball import SnowballStemmer
 
 ## multiprocessing
 from multiprocessing import cpu_count, Pool
-
 
 ################
 ## Parameters ##
@@ -49,7 +49,7 @@ NLP_DESC = True
 NLP_NAME = True
 NLP_CAT_SPLIT = True
 NLP_CAT_UNSPLIT = True
-NLP_BRAND = True
+HOT_BRAND = True
 NAME_LEN = True
 DESC_LEN = True
 DESC_LEN_POLY = True
@@ -59,7 +59,7 @@ CONDITION = True
 
 
 ## Random state
-RAND = 0                 # 'None', int...
+RAND = 145               # 'None', int...
 
 ## Multiproc number
 N_CORES = 3
@@ -76,7 +76,6 @@ more_stop = ['i\'d', 'i\'m', 'i\'ll', ';)', '***', '**', ':)', '(:', '(;', ':-)'
 for i in more_stop:
     stop.add(i)
 
-	
 ###############
 ## Functions ##
 ###############
@@ -98,12 +97,12 @@ def fill_na_unique(df, columns):
     fill_with = [[columns[i]+'_'+str(k) for k in range(n_nan[i])] for i in range(n_col)]
     for i in range(n_col):
         df[columns[i]][pd.isnull(df[columns[i]])] = fill_with[i]
-
+    
 ### find if an element of 'str_list' is in 'string'
 def str_extract(string, str_list):
     match = re.search(str_list, string, flags=re.IGNORECASE)
     extr = match.group(0) if match else np.nan
-    return extr	
+    return extr
 
 ### 
 def feature_extract(df, col, str_list):
@@ -125,7 +124,7 @@ def parallelize(func, data, col, arg):
     pool.close()
     pool.join()
     return data
-    
+
 ## SIGKDD ---------------------------------------------------------------------
 ### weighted EV
 def ev_cat(n, ev_loc, ev_glob):
@@ -182,7 +181,6 @@ def merge_EV(train, test, cats, keep_all=False):
 ## NLP ------------------------------------------------------------------------
 ### corpus2csc
 def csc_from_col(df, col, tfidf = True, min_ngram = 1, max_ngram = 3, max_df = 1.0, min_df = 1, max_features = 2000000, idf_log = False, smooth_idf = True):
-#def csc_from_col(df, col, tfidf = True, min_ngram = 1, max_ngram = 1, max_df = 1.0, min_df = 1, max_features = 20000000, idf_log = False, smooth_idf = True):
     print("Begin "+col+" NLP : " + str(datetime.datetime.now().time()))
 
     #def stemming(doc):
@@ -203,7 +201,7 @@ def csc_from_col(df, col, tfidf = True, min_ngram = 1, max_ngram = 3, max_df = 1
     print("End "+col+" NLP : " + str(datetime.datetime.now().time()))
     return my_doc_term
 
-## ??? ------------------------------------------------------------------------
+## utils ------------------------------------------------------------------------
 ###
 def multilabel(df, col, char_split = None):
     mlb = MultiLabelBinarizer(sparse_output = True)
@@ -221,7 +219,6 @@ def split_col(df, col, delim = None):
     df[new_cols_names] = new_cols
     return new_cols_names
 
-
 ###
 def has_feature(df, col, name):
     df[name] = pd.notnull(df[col]).apply(int)
@@ -232,48 +229,58 @@ def no_desc_to_nan(df,col,str):
     df[col].apply(lambda x : np.nan if x == str else x)
 
 ###
-def tokenize(df, columns, stop_w = None):
-    if isinstance(columns, str):
-        columns = [columns]
-    vectorizer = CountVectorizer(stop_words = stop_w)
-    new_cols = []
-    for col in columns:
-        new_cols.append(col+'_token')
-        df[col+'_token'] = df[col].apply(vectorizer.build_analyzer())
-    return new_cols
+#def tokenize(df, columns, stop_w = None):
+#    if isinstance(columns, str):
+#        columns = [columns]
+#    vectorizer = CountVectorizer(stop_words = stop_w)
+#    new_cols = []
+#    for col in columns:
+#        new_cols.append(col+'_token')
+#        df[col+'_token'] = df[col].apply(vectorizer.build_analyzer())
+#    return new_cols
+#
+####
+#def word_count(df, col, name, func = lambda x: x):
+#    df[name] = df[col].apply(len)
+#    df[name] = df[name].apply(func)
+#    df[name] = RobustScaler().fit_transform(df[name].to_frame())
+#    return csc_matrix(df[name]).transpose()
 
 ###
-def word_count(df, col, name, func = lambda x: x):
-    df[name] = df[col].apply(len)
-    df[name] = df[name].apply(func)
-    df[name] = RobustScaler().fit_transform(df[name].to_frame())
-    return csc_matrix(df[name]).transpose()
+def one_hot(df, col):
+    enc = OneHotEncoder()
+    my_matrix = enc.fit_transform(df[col].astype('category').cat.codes.to_frame())
+    return my_matrix
 
-
+###
+def get_col_len(csc_list, pos, p = 1):
+    col_len = np.power(csc_list[pos].tocsr().sum(axis = 1), p)
+    return csc_matrix(RobustScaler().fit_transform(col_len))
+     
 
 ##########
 ## Main ##
 ##########
 
-## Read and clean -------------------------------------------------------------
-print("Read and Pre-Preprocessing : " + str(datetime.datetime.now().time()))
+## Read and clean
+print("Read and PrePreprocessing : " + str(datetime.datetime.now().time()))
 
 ### Read train
 df_train = pd.read_table('../input/train.tsv', index_col = 0)            
 sup_index_train = len(df_train)
 df_train = df_train[df_train['price'] != 0]                    # drop price == 0$
-df_train['price'] = np.log(df_train['price']+1)                # take log of price
+df_train['price'] = np.log(df_train['price']+1)                # Price -> Log
 
 ### Read test
 if SUB:
   df_test = pd.read_table('../input/test.tsv', index_col = 0)
-  df_test.index = df_test.index + sup_index_train
-
-else:	
-    df_train, df_test = train_test_split(df_train, test_size=0.3, random_state=RAND)
+  df_test.index = df_test.index + sup_index_train 
+  
+else:
+  df_train, df_test = train_test_split(df_train, test_size=0.3, random_state=RAND)
 
 split_index = len(df_train) 
-print("Finished Pre-Preprocessing : " + str(datetime.datetime.now().time()))
+print("Finished PrePreprocessing : " + str(datetime.datetime.now().time()))
 
 
 ## Preprocessing --------------------------------------------------------------
@@ -302,9 +309,9 @@ print("End feature creation : " + str(datetime.datetime.now().time()))
 
 ### Fill NaNs 1
 fill_na_fast(whole, ['item_description','name'])
-feature_token = tokenize(whole, ['name','item_description'])
 cats_list = split_col(whole, 'category_name', delim = '/')
 fill_na_fast(whole, ['category_name']+cats_list)
+
 ### Extract some missing brand names
 print("Start extracting brand names : " + str(datetime.datetime.now().time()))
 brands_list = sorted(whole['brand_name'][whole['brand_name'].notnull()].unique(), key = len, reverse = True)
@@ -316,7 +323,7 @@ if HAS_BRAND_NOW:
 print("End extracting brand names : " + str(datetime.datetime.now().time()))
 
 ### Fill NaNs 2
-fill_na_fast(whole, ['brand_name'])
+fill_na_fast(whole, 'brand_name')
 
 ### NLP
 print("Begin NLP Stuff : " + str(datetime.datetime.now().time()))
@@ -324,31 +331,35 @@ if NLP_DESC:
     csc_m_list.append(csc_from_col(whole, 'item_description'))
 if NLP_NAME:
     csc_m_list.append(csc_from_col(whole, 'name'))
-if NLP_BRAND:
-    csc_m_list.append(csc_from_col(whole, 'brand_name'))
+if HOT_BRAND:
+    csc_m_list.append(one_hot(whole, 'brand_name'))
 if NLP_CAT_SPLIT:
     for cat in cats_list:
         csc_m_list.append(csc_from_col(whole, cat))
 if NLP_CAT_UNSPLIT:
     csc_m_list.append(csc_from_col(whole, 'category_name'))
 print("End NLP Stuff : " + str(datetime.datetime.now().time()))
-  
+    
 ### Length Features
 if NAME_LEN:
-    csc_m_list.append(word_count(whole, 'name_token', 'name_len'))
+#    csc_m_list.append(word_count(whole, 'name_token', 'name_len'))
+    csc_m_list.append(get_col_len(csc_m_list, 5))
 if DESC_LEN:
-    csc_m_list.append(word_count(whole, 'item_description_token', 'desc_len'))
+#    csc_m_list.append(word_count(whole, 'item_description_token', 'desc_len'))
+    csc_m_list.append(get_col_len(csc_m_list, 4))
 if DESC_LEN_POLY:
-	csc_m_list.append(word_count(whole, 'item_description_token', 'desc_len', lambda x: x^2))
+    csc_m_list.append(get_col_len(csc_m_list, 4, 2))
+#	csc_m_list.append(word_count(whole, 'item_description_token', 'desc_len', lambda x: x^2))
+
 ### Dummies
-print("Begin shipping and condition processing : " + str(datetime.datetime.now().time()))
+print("Begin shipping, category and condition processing : " + str(datetime.datetime.now().time()))
 if SHIPPING:
     csc_m_list.append(csc_matrix(whole['shipping']).transpose())
 if CONDITION:
     csc_m_list.append(csc_matrix(pd.get_dummies(whole['item_condition_id'], sparse = True)))
 if MULTILAB_CAT:
     csc_m_list.append(multilabel(whole, 'category_name', '/'))
-print("End shipping and condition processing : " + str(datetime.datetime.now().time()))
+print("End shipping, category and condition processing : " + str(datetime.datetime.now().time()))
 
 ## Final csc ..................................................................
 csc_final = hstack(csc_m_list)
@@ -367,7 +378,7 @@ print("End Preprocessing : " + str(datetime.datetime.now().time()))
 #estimator = AdaBoostRegressor()
 #estimator = BaggingRegressor(n_estimators=10,n_jobs=-1,verbose=True)
 #estimator = GradientBoostingRegressor(n_estimators=20, verbose=1)
-estimator = Ridge(solver="sag", fit_intercept=True, random_state=RAND, alpha = 2)
+estimator = Ridge(copy_X = False, solver="sag", fit_intercept=True, random_state=RAND, alpha = 1.5)
 #estimator = HuberRegressor(epsilon=1.35, max_iter=100, alpha=0.0001, warm_start=False, fit_intercept=True, tol=1e-05)
 #estimator = SGDRegressor(loss=’squared_loss’, penalty=’l2’, alpha=0.0001, l1_ratio=0.15, max_iter=5, tol=None, shuffle=True, epsilon=0.1, random_state=RAND, learning_rate=’invscaling’, eta0=0.01, power_t=0.25)
 #estimator = Lasso()
@@ -386,8 +397,9 @@ if not SUB:
     df_test['eval'] = (df_test['predicted'] - df_test['price'])**2
     eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
     print("score: ", eval1)
+    print('End : ' + str(datetime.datetime.now().time()))
 else:
-   df_sub = pd.DataFrame({'test_id' : df_test.index - sup_index_train})
-   df_sub['price'] = np.exp(estimator.predict(csc_test))-1
-   df_sub['price'][df_sub['price'] < 3] = 3
-   df_sub.to_csv('submission.csv',index=False)
+    df_sub = pd.DataFrame({'test_id' : df_test.index - sup_index_train})
+    df_sub['price'] = np.exp(estimator.predict(csc_test))-1
+    df_sub['price'][df_sub['price'] < 3] = 3
+    df_sub.to_csv('submission.csv',index=False)
