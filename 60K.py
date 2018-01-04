@@ -22,16 +22,17 @@ from scipy.sparse import csc_matrix, csr_matrix, hstack
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import Ridge, SGDRegressor, HuberRegressor
 #from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
-from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
+from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer, TfidfVectorizer
 from sklearn.preprocessing import OneHotEncoder, MultiLabelBinarizer
-from sklearn.preprocessing import MaxAbsScaler, RobustScaler, QuantileTransformer
+from sklearn.preprocessing import MaxAbsScaler, RobustScaler, QuantileTransformer, StandardScaler
 
 ## nltk
 from nltk.corpus import stopwords
-#from nltk.stem.snowball import SnowballStemmer
+from nltk.stem.snowball import SnowballStemmer
 
 ## multiprocessing
 from multiprocessing import cpu_count, Pool
+
 
 ################
 ## Parameters ##
@@ -41,12 +42,15 @@ from multiprocessing import cpu_count, Pool
 SUB = False
 
 ## Strat
+STEMMING = True
 HAS_BRAND = True
 HAS_DESC = True
 HAS_CAT = True
 HAS_BRAND_NOW = True
+IS_BUNDLE = True
 NLP_DESC = True
 NLP_NAME = True
+NLP_BRAND = True
 NLP_CAT_SPLIT = True
 NLP_CAT_UNSPLIT = True
 HOT_BRAND = True
@@ -69,18 +73,19 @@ LAMBDA_K = 10            # tune EV weighted function
 LAMBDA_F = 1             #          //
 FUNC = 'mean'            # function to use in high-level categorical features processing
 
-## English stop words
-stop = set(stopwords.words('english'))
-more_stop = ['i\'d', 'i\'m', 'i\'ll', ';)', '***', '**', ':)', '(:', '(;', ':-)', '//']
+## NLP_STUFF
+TOKEN_PAT = "(?u)\\b\w\w+\\b"
+STEMMER = SnowballStemmer('english', ignore_stopwords = False)
+STOP_W = set(stopwords.words('english'))
+more_stop = set(['i\'d', 'i\'m', 'i\'ll', ';)', '***', '**', ':)', '(:', '(;', ':-)', '//'])
+STOP_W |= more_stop
 
-for i in more_stop:
-    stop.add(i)
-
+	
 ###############
 ## Functions ##
 ###############
 
-## Filling NaNs ---------------------------------------------------------------
+## -------------------- Filling NaNs --------------------
 ### fast fill nans
 def fill_na_fast(df, columns):
     if isinstance(columns, str):
@@ -104,17 +109,17 @@ def str_extract(string, str_list):
     extr = match.group(0) if match else np.nan
     return extr
 
-### 
+### Apply str_extract for col of df
 def feature_extract(df, col, str_list):
     return df[col].map(lambda x : str_extract(x, str_list))
 
-###
+### Fill NaN of col_to_fill of df with extract from col
 def fill_from_extr(df, col_to_fill, col_extr, str_list):
     from_col = parallelize(feature_extract, df[col_extr][df[col_to_fill].isnull()].to_frame(), col_extr, str_list)
     df[col_to_fill].fillna(from_col, inplace=True)
 
 
-## Parallelization ------------------------------------------------------------
+## -------------------- Parallelization --------------------
 ### parallelize
 def parallelize(func, data, col, arg):
     data_split = np.array_split(data, N_CORES) 
@@ -125,7 +130,7 @@ def parallelize(func, data, col, arg):
     pool.join()
     return data
 
-## SIGKDD ---------------------------------------------------------------------
+## -------------------- SIGKDD --------------------
 ### weighted EV
 def ev_cat(n, ev_loc, ev_glob):
     k = LAMBDA_K
@@ -178,37 +183,50 @@ def merge_EV(train, test, cats, keep_all=False):
     else:
         return train[all_cats], test[all_cats]
  
-## NLP ------------------------------------------------------------------------
-### corpus2csc
-def csc_from_col(df, col, tfidf = True, min_ngram = 1, max_ngram = 3, max_df = 1.0, min_df = 1, max_features = 2000000, idf_log = False, smooth_idf = True):
+## -------------------- NLP --------------------
+### stem 1 doc
+def stem_word(doc,stemmer):
+    tokens = [w for w in CountVectorizer(token_pattern=TOKEN_PAT).build_analyzer()(doc)]
+    return " ".join([stemmer.stem(w) for w in tokens])
+
+### stem col of df
+def stem(df, col, stemmer):
+    return df[col].apply(lambda doc: stem_word(doc,stemmer))
+
+### Tf-idf col of df
+def csc_from_col(df, col, token_pattern=TOKEN_PAT, min_ngram=1, max_ngram=3, max_df=0.95, min_df=2, max_features=None, idf_log=False, smooth_idf=True):
     print("Begin "+col+" NLP : " + str(datetime.datetime.now().time()))
+    df_col = df[col].to_frame()
+    
+    if STEMMING:
+    df_col = parallelize(stem, df_col, col, STEMMER)
 
-    #def stemming(doc):
-    #    return (my_stemmer.stem(w) for w in my_analyzer(doc))
-
-    #my_stemmer = SnowballStemmer('english', ignore_stopwords = True)
-    #my_analyzer = CountVectorizer().build_analyzer()
-    my_vectorizer = CountVectorizer(stop_words = stop,
-                                    ngram_range = (min_ngram, max_ngram),
+    my_vectorizer = TfidfVectorizer(strip_accents = 'unicode',
+                                    token_pattern = token_pattern,
+                                    stop_words = STOP_W,
+                                    ngram_range =(min_ngram, max_ngram),
                                     max_df = max_df,
                                     min_df = min_df,
-                                    max_features = max_features)
-                                    #analyzer = stemming)
-    my_doc_term = my_vectorizer.fit_transform(df[col])
-    if tfidf:
-        tfidf_trans = TfidfTransformer(smooth_idf = smooth_idf, sublinear_tf = idf_log)
-        my_doc_term = tfidf_trans.fit_transform(my_doc_term)
+                                    max_features = max_features,
+                                    smooth_idf = smooth_idf,
+                                    sublinear_tf = idf_log)
+    my_doc_term = my_vectorizer.fit_transform(df_col)
+    print(my_doc_term.shape)
     print("End "+col+" NLP : " + str(datetime.datetime.now().time()))
     return my_doc_term
 
-## utils ------------------------------------------------------------------------
-###
+## -------------------- New features --------------------
+### Multilabel col of df
 def multilabel(df, col, char_split = None):
     mlb = MultiLabelBinarizer(sparse_output = True)
     if char_split:
         df[col] = df[col].str.split(char_split)
     my_matrix = mlb.fit_transform(df[col])
     return my_matrix
+
+### One hot col of df
+def one_hot(df, col):
+    return OneHotEncoder().fit_transform(df[col].astype('category').cat.codes.to_frame())
 
 ### Split column 'col' using delimiter 'delim'
 def split_col(df, col, delim = None):
@@ -219,50 +237,34 @@ def split_col(df, col, delim = None):
     df[new_cols_names] = new_cols
     return new_cols_names
 
-###
+### Add feature : doc in col is Nan or not
 def has_feature(df, col, name):
     df[name] = pd.notnull(df[col]).apply(int)
     return csc_matrix(df[name]).transpose()
 
-###
-def no_desc_to_nan(df,col,str):
-    df[col].apply(lambda x : np.nan if x == str else x)
+### Change value in col of df to NaN if == string
+def str_to_nan(df, col, string):
+    df[col].apply(lambda x : np.nan if x == string else x)
 
-###
-#def tokenize(df, columns, stop_w = None):
-#    if isinstance(columns, str):
-#        columns = [columns]
-#    vectorizer = CountVectorizer(stop_words = stop_w)
-#    new_cols = []
-#    for col in columns:
-#        new_cols.append(col+'_token')
-#        df[col+'_token'] = df[col].apply(vectorizer.build_analyzer())
-#    return new_cols
-#
-####
-#def word_count(df, col, name, func = lambda x: x):
-#    df[name] = df[col].apply(len)
-#    df[name] = df[name].apply(func)
-#    df[name] = RobustScaler().fit_transform(df[name].to_frame())
-#    return csc_matrix(df[name]).transpose()
+### Count words in 1 doc
+def word_count(doc, pat):
+    return len([w for w in CountVectorizer(token_pattern=pat).build_analyzer()(doc)])
 
-###
-def one_hot(df, col):
-    enc = OneHotEncoder()
-    my_matrix = enc.fit_transform(df[col].astype('category').cat.codes.to_frame())
-    return my_matrix
+### Count words in col of df
+def get_len(df, col, pat):
+    return df[col].apply(lambda doc: word_count(doc, pat))
 
-###
-def get_col_len(csc_list, pos, p = 1):
-    col_len = np.power(csc_list[pos].tocsr().sum(axis = 1), p)
-    return csc_matrix(RobustScaler().fit_transform(col_len))
-     
+### Add feature word count for col of df
+def add_len_feature(df, col, pat=TOKEN_PAT, p=1):
+    new_col = np.power(parallelize(get_len, df, col, pat),p)
+    return csc_matrix(RobustScaler().fit_transform(new_col.to_frame()))
+
 
 ##########
 ## Main ##
 ##########
 
-## Read and clean
+## -------------------- Read and clean --------------------
 print("Read and PrePreprocessing : " + str(datetime.datetime.now().time()))
 
 ### Read train
@@ -283,13 +285,13 @@ split_index = len(df_train)
 print("Finished PrePreprocessing : " + str(datetime.datetime.now().time()))
 
 
-## Preprocessing --------------------------------------------------------------
+## -------------------- Preprocessing --------------------
 print("Begin Preprocessing : " + str(datetime.datetime.now().time()))
 whole = pd.concat([df_train, df_test])
 
 ### Standardize text and Nans
 print("Begin standardization : " + str(datetime.datetime.now().time()))
-no_desc_to_nan(whole, 'item_description', 'No description yet')
+str_to_nan(whole, 'item_description', 'No description yet')
 whole = whole.applymap(lambda x: x if type(x)!=str else x.lower())
 print("End standardization : " + str(datetime.datetime.now().time()))
 
@@ -303,8 +305,6 @@ if HAS_DESC:
     csc_m_list.append(has_feature(whole, 'item_description', 'has_item_description'))
 if HAS_CAT:
     csc_m_list.append(has_feature(whole, 'category_name', 'has_category_name'))
-
-# To do : check name
 print("End feature creation : " + str(datetime.datetime.now().time()))
 
 ### Fill NaNs 1
@@ -331,6 +331,8 @@ if NLP_DESC:
     csc_m_list.append(csc_from_col(whole, 'item_description'))
 if NLP_NAME:
     csc_m_list.append(csc_from_col(whole, 'name'))
+if NLP_BRAND:
+    csc_m_list.append(csc_from_col(whole, 'brand_name'))
 if HOT_BRAND:
     csc_m_list.append(one_hot(whole, 'brand_name'))
 if NLP_CAT_SPLIT:
@@ -339,20 +341,22 @@ if NLP_CAT_SPLIT:
 if NLP_CAT_UNSPLIT:
     csc_m_list.append(csc_from_col(whole, 'category_name'))
 print("End NLP Stuff : " + str(datetime.datetime.now().time()))
-    
+
 ### Length Features
+print("Begin word counts : " + str(datetime.datetime.now().time()))
 if NAME_LEN:
-#    csc_m_list.append(word_count(whole, 'name_token', 'name_len'))
-    csc_m_list.append(get_col_len(csc_m_list, 5))
+    csc_m_list.append(add_len_feature(whole, 'name'))
 if DESC_LEN:
-#    csc_m_list.append(word_count(whole, 'item_description_token', 'desc_len'))
-    csc_m_list.append(get_col_len(csc_m_list, 4))
+    csc_m_list.append(add_len_feature(whole, 'item_description'))
 if DESC_LEN_POLY:
-    csc_m_list.append(get_col_len(csc_m_list, 4, 2))
-#	csc_m_list.append(word_count(whole, 'item_description_token', 'desc_len', lambda x: x^2))
+    csc_m_list.append(add_len_feature(whole, 'item_description', p=2))
+print("End word counts : " + str(datetime.datetime.now().time()))
 
 ### Dummies
 print("Begin shipping, category and condition processing : " + str(datetime.datetime.now().time()))
+if IS_BUNDLE:
+    whole['is_bundle'] = whole['item_description'].str.contains("\\b(bundle|joblot|lot)\\b", case = False) | whole['name'].str.contains("\\b(bundle|joblot|lot)\\b", case = False)
+    csc_m_list.append(csc_matrix(whole['is_bundle']).transpose())
 if SHIPPING:
     csc_m_list.append(csc_matrix(whole['shipping']).transpose())
 if CONDITION:
@@ -361,7 +365,7 @@ if MULTILAB_CAT:
     csc_m_list.append(multilabel(whole, 'category_name', '/'))
 print("End shipping, category and condition processing : " + str(datetime.datetime.now().time()))
 
-## Final csc ..................................................................
+## -------------------- Final csc --------------------
 csc_final = hstack(csc_m_list)
 print("csc_final shape : " + str(csc_final.shape))
 csc_train = csc_final.tocsr()[:split_index]
