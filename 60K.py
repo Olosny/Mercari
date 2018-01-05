@@ -19,7 +19,7 @@ import re
 from scipy.sparse import csc_matrix, csr_matrix, hstack
 
 ## sklearn
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.linear_model import Ridge, SGDRegressor, HuberRegressor
 #from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer, TfidfVectorizer
@@ -40,23 +40,25 @@ from multiprocessing import cpu_count, Pool
 
 ## run sur train split ou sur test pour submit
 SUB = False
+SMALL = False
 
 ## Strat
-STEMMING = True
-HAS_BRAND = True
+STEMMING = False
+HAS_BRAND = False
 HAS_DESC = True
 HAS_CAT = True
+FILL_BRAND = True
 HAS_BRAND_NOW = True
 IS_BUNDLE = True
 NLP_DESC = True
 NLP_NAME = True
-NLP_BRAND = True
-NLP_CAT_SPLIT = True
-NLP_CAT_UNSPLIT = True
+NLP_BRAND = False
+NLP_CAT_SPLIT = False
+NLP_CAT_UNSPLIT = False
 HOT_BRAND = True
 NAME_LEN = True
-DESC_LEN = True
-DESC_LEN_POLY = True
+DESC_LEN = False
+DESC_LEN_POLY = False
 MULTILAB_CAT = True
 SHIPPING = True
 CONDITION = True
@@ -74,13 +76,15 @@ LAMBDA_F = 1             #          //
 FUNC = 'mean'            # function to use in high-level categorical features processing
 
 ## NLP_STUFF
-TOKEN_PAT = "(?u)\\b\w\w+\\b"
+TOKEN_PAT = "(?u)\\b\w+\\b"
 STEMMER = SnowballStemmer('english', ignore_stopwords = False)
 STOP_W = set(stopwords.words('english'))
 more_stop = set(['i\'d', 'i\'m', 'i\'ll', ';)', '***', '**', ':)', '(:', '(;', ':-)', '//'])
 STOP_W |= more_stop
 
-	
+BUNDLE_RE = "\\b(bundl|joblot|lot)\\b"
+
+
 ###############
 ## Functions ##
 ###############
@@ -194,12 +198,11 @@ def stem(df, col, stemmer):
     return df[col].apply(lambda doc: stem_word(doc,stemmer))
 
 ### Tf-idf col of df
-def csc_from_col(df, col, token_pattern=TOKEN_PAT, min_ngram=1, max_ngram=3, max_df=0.95, min_df=2, max_features=None, idf_log=False, smooth_idf=True):
+def csc_from_col(df, col, token_pattern=TOKEN_PAT, min_ngram=1, max_ngram=2, max_df=0.95, min_df=2, max_features=None, idf_log=False, smooth_idf=True):
     print("Begin "+col+" NLP : " + str(datetime.datetime.now().time()))
-    df_col = df[col].to_frame()
-    
+    df_col = df[col]
     if STEMMING:
-    df_col = parallelize(stem, df_col, col, STEMMER)
+        df_col = parallelize(stem, df_col.to_frame(), col, STEMMER)
 
     my_vectorizer = TfidfVectorizer(strip_accents = 'unicode',
                                     token_pattern = token_pattern,
@@ -209,8 +212,9 @@ def csc_from_col(df, col, token_pattern=TOKEN_PAT, min_ngram=1, max_ngram=3, max
                                     min_df = min_df,
                                     max_features = max_features,
                                     smooth_idf = smooth_idf,
-                                    sublinear_tf = idf_log)
+                                    sublinear_tf = idf_log)                                 
     my_doc_term = my_vectorizer.fit_transform(df_col)
+
     print(my_doc_term.shape)
     print("End "+col+" NLP : " + str(datetime.datetime.now().time()))
     return my_doc_term
@@ -255,11 +259,15 @@ def get_len(df, col, pat):
     return df[col].apply(lambda doc: word_count(doc, pat))
 
 ### Add feature word count for col of df
-def add_len_feature(df, col, pat=TOKEN_PAT, p=1):
-    new_col = np.power(parallelize(get_len, df, col, pat),p)
-    return csc_matrix(RobustScaler().fit_transform(new_col.to_frame()))
+def len_feature(df, col, name, pat=TOKEN_PAT):
+    new_col = parallelize(get_len, df, col, pat)
+    df[name] = MaxAbsScaler().fit_transform(new_col.to_frame())
 
+###
+def add_len(df, col, p=1):
+    return csc_matrix(df[col].pow(p)).transpose()
 
+### len_to_dummies()
 ##########
 ## Main ##
 ##########
@@ -275,11 +283,14 @@ df_train['price'] = np.log(df_train['price']+1)                # Price -> Log
 
 ### Read test
 if SUB:
-  df_test = pd.read_table('../input/test.tsv', index_col = 0)
-  df_test.index = df_test.index + sup_index_train 
-  
+    df_test = pd.read_table('../input/test.tsv', index_col = 0)
+    df_test.index = df_test.index + sup_index_train 
+elif SMALL:
+    drop_indices = np.random.choice(df_train.index, int(df_train.shape[0]*0.9), replace=False)
+    df_train.drop(drop_indices, inplace=True)
+    df_test = None
 else:
-  df_train, df_test = train_test_split(df_train, test_size=0.3, random_state=RAND)
+    df_train, df_test = train_test_split(df_train, test_size=0.3, random_state=RAND)
 
 split_index = len(df_train) 
 print("Finished PrePreprocessing : " + str(datetime.datetime.now().time()))
@@ -314,10 +325,11 @@ fill_na_fast(whole, ['category_name']+cats_list)
 
 ### Extract some missing brand names
 print("Start extracting brand names : " + str(datetime.datetime.now().time()))
-brands_list = sorted(whole['brand_name'][whole['brand_name'].notnull()].unique(), key = len, reverse = True)
-brands_list = "\\b("+"|".join([re.escape(m) for m in brands_list])+")\\b"
-fill_from_extr(whole, 'brand_name', 'name', brands_list)
-fill_from_extr(whole, 'brand_name', 'item_description', brands_list)
+if FILL_BRAND:
+    brands_list = sorted(whole['brand_name'][whole['brand_name'].notnull()].unique(), key = len, reverse = True)
+    brands_list = "\\b("+"|".join([re.escape(m) for m in brands_list])+")\\b"
+    fill_from_extr(whole, 'brand_name', 'name', brands_list)
+    fill_from_extr(whole, 'brand_name', 'item_description', brands_list)
 if HAS_BRAND_NOW:
     csc_m_list.append(has_feature(whole, 'brand_name', 'has_brand_now'))
 print("End extracting brand names : " + str(datetime.datetime.now().time()))
@@ -344,18 +356,20 @@ print("End NLP Stuff : " + str(datetime.datetime.now().time()))
 
 ### Length Features
 print("Begin word counts : " + str(datetime.datetime.now().time()))
+len_feature(whole, 'name', 'name_len')
+len_feature(whole, 'item_description', 'item_description_len')
 if NAME_LEN:
-    csc_m_list.append(add_len_feature(whole, 'name'))
+    csc_m_list.append(add_len(whole, 'name_len'))
 if DESC_LEN:
-    csc_m_list.append(add_len_feature(whole, 'item_description'))
+    csc_m_list.append(add_len(whole, 'item_description_len'))
 if DESC_LEN_POLY:
-    csc_m_list.append(add_len_feature(whole, 'item_description', p=2))
+    csc_m_list.append(add_len(whole, 'item_description_len', p=2))
 print("End word counts : " + str(datetime.datetime.now().time()))
 
 ### Dummies
 print("Begin shipping, category and condition processing : " + str(datetime.datetime.now().time()))
 if IS_BUNDLE:
-    whole['is_bundle'] = whole['item_description'].str.contains("\\b(bundle|joblot|lot)\\b", case = False) | whole['name'].str.contains("\\b(bundle|joblot|lot)\\b", case = False)
+    whole['is_bundle'] = whole['item_description'].str.contains(BUNDLE_RE, case = False) | whole['name'].str.contains(BUNDLE_RE, case = False)
     csc_m_list.append(csc_matrix(whole['is_bundle']).transpose())
 if SHIPPING:
     csc_m_list.append(csc_matrix(whole['shipping']).transpose())
@@ -391,19 +405,24 @@ estimator = Ridge(copy_X = False, solver="sag", fit_intercept=True, random_state
 #estimator = NuSVR(verbose=True)
 print("estimator: ", estimator.__class__.__name__)
 print("params: ", estimator.get_params())
-estimator.fit(csc_train, df_train.price)
 
-if not SUB:
-    df_test['predicted'] = estimator.predict(csc_test)
-    df_test['predicted'] = np.exp(df_test['predicted'])-1
-    df_test['predicted'][df_test['predicted'] < 3] = 3
-    df_test['predicted'] = np.log(df_test['predicted']+1)
-    df_test['eval'] = (df_test['predicted'] - df_test['price'])**2
-    eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
-    print("score: ", eval1)
-    print('End : ' + str(datetime.datetime.now().time()))
+if SMALL:
+    print(cross_val_score(estimator, csc_train, df_train.price, cv=5, verbose=2).mean())
+
 else:
-    df_sub = pd.DataFrame({'test_id' : df_test.index - sup_index_train})
-    df_sub['price'] = np.exp(estimator.predict(csc_test))-1
-    df_sub['price'][df_sub['price'] < 3] = 3
-    df_sub.to_csv('submission.csv',index=False)
+    estimator.fit(csc_train, df_train.price)
+
+    if not SUB:
+        df_test['predicted'] = estimator.predict(csc_test)
+        df_test['predicted'] = np.exp(df_test['predicted'])-1
+        df_test['predicted'][df_test['predicted'] < 3] = 3
+        df_test['predicted'] = np.log(df_test['predicted']+1)
+        df_test['eval'] = (df_test['predicted'] - df_test['price'])**2
+        eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
+        print("score: ", eval1)
+        print('End : ' + str(datetime.datetime.now().time()))
+    else:
+        df_sub = pd.DataFrame({'test_id' : df_test.index - sup_index_train})
+        df_sub['price'] = np.exp(estimator.predict(csc_test))-1
+        df_sub['price'][df_sub['price'] < 3] = 3
+        df_sub.to_csv('submission.csv',index=False)
