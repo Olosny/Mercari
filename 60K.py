@@ -104,6 +104,10 @@ BUNDLE_RE = "\\b(bundl\w?|joblot|lot)\\b"
 ###############
 
 ## -------------------- Neural Net ----------------------
+def sanitize_text(df, col):
+    chars_del = re.compile(r"[^A-Za-z0-9(),!?@\'\`\"\_\n]")
+    return df[col].apply(lambda x : [re.sub(chars_del, word, '') for word in x if not word in STOP_W])
+
 def get_nn_data(df):
     X = {'name': pad_sequences(df.name, padding = 'post'),
          'item_desc': pad_sequences([i[:ct_dict['desc_len']] for i in df.item_description], padding = 'post'),
@@ -166,24 +170,24 @@ def good_model():
                      Flatten()(emb_cat_3),
                      Flatten()(emb_cat_4)])
     #x = BatchNormalization()(x)
-    #x = Dropout(0.3)(x)
+    #x = Dropout(0.1)(x)
     
     # Dense
     x = Dense(512, activation = 'relu')(x)
     #x = BatchNormalization()(x)
-    #x = Dropout(0.3)(x)
+    #x = Dropout(0.1)(x)
     x = Dense(256, activation = 'relu')(x)
     #x = BatchNormalization()(x)
-    #x = Dropout(0.3)(x)
+    #x = Dropout(0.1)(x)
     x = Dense(128, activation = 'relu')(x)
     #x = BatchNormalization()(x)
-    #x = Dropout(0.3)(x)
+    #x = Dropout(0.1)(x)
     x = Dense(64, activation = 'relu')(x)
     #x = BatchNormalization()(x)
-    #x = Dropout(0.3)(x)
+    #x = Dropout(0.1)(x)
     
     # Output
-    output = Dense(1, activation = 'relu')(x)
+    output = Dense(1, activation = 'linear')(x)
     
     # Model
     model = Model([name, desc, brand, cond, shipping, desc_len, name_len, cat_0, cat_1, cat_2, cat_3, cat_4], output)
@@ -743,23 +747,23 @@ history = model.fit(X_train,
 
 print('End : ' + str(time.time() - t))
 
-whole['cat_brand'] = whole['category_name'] + '/' + whole['brand_name']
-cat_tok = tokenize(whole, 'cat_brand', 10000)
-#cat_tok = tokenize(whole, 'category_name', 1025)
-cat_tok = pad_sequences(cat_tok, padding = 'post')
-name_tok = tokenize(whole, 'name', 10000)
-name_tok = pad_sequences(name_tok, padding = 'post')
-desc_tok = [i[:50] for i in tokenize(whole, 'item_description', 10000)]
-desc_tok = pad_sequences(desc_tok, padding = 'post')
-
-#model = emb_model(cat_tok, name_tok, desc_tok, csc_train)
-model = conv_emb_model(cat_tok, name_tok, desc_tok, csc_train)
-history = model.fit([cat_tok[:split_index], name_tok[:split_index], desc_tok[:split_index], csc_train.toarray()],
-                    [df_train.price, df_train.price, df_train.price, df_train.price],
-                    epochs=5,
-                    batch_size=1000,
-                    validation_data=([cat_tok[split_index:], name_tok[split_index:], desc_tok[split_index:], csc_test.toarray()],
-                                     [df_test.price, df_test.price, df_test.price, df_test.price]))
+#whole['cat_brand'] = whole['category_name'] + '/' + whole['brand_name']
+#cat_tok = tokenize(whole, 'cat_brand', 10000)
+##cat_tok = tokenize(whole, 'category_name', 1025)
+#cat_tok = pad_sequences(cat_tok, padding = 'post')
+#name_tok = tokenize(whole, 'name', 10000)
+#name_tok = pad_sequences(name_tok, padding = 'post')
+#desc_tok = [i[:50] for i in tokenize(whole, 'item_description', 10000)]
+#desc_tok = pad_sequences(desc_tok, padding = 'post')
+#
+##model = emb_model(cat_tok, name_tok, desc_tok, csc_train)
+#model = conv_emb_model(cat_tok, name_tok, desc_tok, csc_train)
+#history = model.fit([cat_tok[:split_index], name_tok[:split_index], desc_tok[:split_index], csc_train.toarray()],
+#                    [df_train.price, df_train.price, df_train.price, df_train.price],
+#                    epochs=5,
+#                    batch_size=1000,
+#                    validation_data=([cat_tok[split_index:], name_tok[split_index:], desc_tok[split_index:], csc_test.toarray()],
+#                                     [df_test.price, df_test.price, df_test.price, df_test.price]))
 #history = model.fit([cat_tok[:split_index], desc_tok[:split_index], csc_train.toarray()],
 #                    [df_train.price, df_train.price, df_train.price],
 #                    epochs=5,
