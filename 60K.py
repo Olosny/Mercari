@@ -23,7 +23,7 @@ from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.linear_model import Ridge, SGDRegressor
 from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer, TfidfVectorizer
-from sklearn.preprocessing import OneHotEncoder, MultiLabelBinarizer
+from sklearn.preprocessing import OneHotEncoder, MultiLabelBinarizer, LabelEncoder
 from sklearn.preprocessing import MaxAbsScaler, RobustScaler, QuantileTransformer, StandardScaler
 from sklearn.feature_selection import SelectKBest, RFE
 ## nltk
@@ -35,7 +35,7 @@ from multiprocessing import cpu_count, Pool
 
 ## keras
 from keras.models import Sequential, Model
-from keras.layers import Embedding, Reshape, Activation, Input, Dense, Flatten, GRU, concatenate, LSTM, Conv1D, GlobalMaxPooling1D
+from keras.layers import Embedding, Reshape, Activation, Input, Dense, Flatten, GRU, concatenate, LSTM, Conv1D, GlobalMaxPooling1D, MaxPooling1D, BatchNormalization, Dropout
 from keras.layers.merge import Dot
 from keras.utils import np_utils
 from keras.utils.data_utils import get_file
@@ -45,6 +45,7 @@ from keras import optimizers
 
 ## gensim
 from gensim.models import Doc2Vec
+from gensim.models.doc2vec import Doc2Vec
 from collections import namedtuple
     
 ################
@@ -60,7 +61,7 @@ STEMMING = False
 HAS_BRAND = False
 HAS_DESC = False
 HAS_CAT = False
-FILL_BRAND = False
+FILL_BRAND = True
 HAS_BRAND_NOW = False
 IS_BUNDLE = False
 NLP_DESC = False
@@ -73,8 +74,8 @@ NAME_LEN = False
 DESC_LEN = False
 DESC_LEN_POLY = False
 MULTILAB_CAT = False
-SHIPPING = True
-CONDITION = True
+SHIPPING = False
+CONDITION = False
 
 
 ## Random state
@@ -101,6 +102,261 @@ BUNDLE_RE = "\\b(bundl\w?|joblot|lot)\\b"
 ###############
 ## Functions ##
 ###############
+
+## -------------------- Neural Net ----------------------
+def get_nn_data(df):
+    X = {'name': pad_sequences(df.name, padding = 'post'),
+         'item_desc': pad_sequences([i[:ct_dict['desc_len']] for i in df.item_description], padding = 'post'),
+         'brand_name': np.array(df[['brand_name']]),
+         'item_condition': np.array(df[['item_condition_id']]),
+         'shipping': np.array(df[["shipping"]]),
+         'desc_len': np.array(df[["desc_len"]]),
+         'name_len': np.array(df[["name_len"]])}
+    
+    for col in [i for i in whole.columns if 'category_name_' in i]:
+        X.update({col : np.array(df[[col]])})
+    
+    return X
+
+def good_model():
+    # Inputs
+    name = Input(shape=[X["name"].shape[1]], name="name")
+    desc = Input(shape=[X["item_desc"].shape[1]], name="item_desc")
+    brand = Input(shape=[X["brand_name"].shape[1]], name="brand_name")
+    cond = Input(shape=[X["item_condition"].shape[1]], name="item_condition")
+    shipping = Input(shape=[X["shipping"].shape[1]], name="shipping")
+    desc_len = Input(shape=[X["desc_len"].shape[1]], name="desc_len")
+    name_len = Input(shape=[X["name_len"].shape[1]], name="name_len")
+    cat_0 = Input(shape=[X["category_name_0"].shape[1]], name="category_name_0")
+    cat_1 = Input(shape=[X["category_name_1"].shape[1]], name="category_name_1")
+    cat_2 = Input(shape=[X["category_name_2"].shape[1]], name="category_name_2")
+    cat_3 = Input(shape=[X["category_name_3"].shape[1]], name="category_name_3")
+    cat_4 = Input(shape=[X["category_name_4"].shape[1]], name="category_name_4")
+    
+    # Embeddings
+    emb_name = Embedding(ct_dict['num_name'], 20)(name)
+    emb_desc = Embedding(ct_dict['num_desc'], 50)(desc)
+    emb_brand = Embedding(ct_dict['brand_name'], 10)(brand)
+    emb_cond = Embedding(ct_dict['num_cond'], 5)(cond)
+    emb_desc_len = Embedding(ct_dict['num_desc_len'], 5)(desc_len)
+    emb_name_len = Embedding(ct_dict['num_name_len'], 5)(name_len)
+    emb_cat_0 = Embedding(ct_dict['category_name_0'], 10)(cat_0)
+    emb_cat_1 = Embedding(ct_dict['category_name_1'], 10)(cat_1)
+    emb_cat_2 = Embedding(ct_dict['category_name_2'], 30)(cat_2)
+    emb_cat_3 = Embedding(ct_dict['category_name_3'], 10)(cat_3)
+    emb_cat_4 = Embedding(ct_dict['category_name_4'], 10)(cat_4)
+    
+    # Convnet
+    conv_name = Conv1D(32, 9, activation = 'relu')(emb_name)
+    pool_name = GlobalMaxPooling1D()(conv_name)
+    conv_desc = Conv1D(32, 5, activation = 'relu')(emb_desc)
+    pool_desc = GlobalMaxPooling1D()(conv_desc)
+    
+    # Concat
+    x = concatenate([pool_name,
+                     pool_desc,
+                     Flatten()(emb_brand),
+                     Flatten()(emb_cond),
+                     shipping,
+                     Flatten()(emb_desc_len),
+                     Flatten()(emb_name_len),
+                     Flatten()(emb_cat_0),
+                     Flatten()(emb_cat_1),
+                     Flatten()(emb_cat_2),
+                     Flatten()(emb_cat_3),
+                     Flatten()(emb_cat_4)])
+    #x = BatchNormalization()(x)
+    #x = Dropout(0.3)(x)
+    
+    # Dense
+    x = Dense(512, activation = 'relu')(x)
+    #x = BatchNormalization()(x)
+    #x = Dropout(0.3)(x)
+    x = Dense(256, activation = 'relu')(x)
+    #x = BatchNormalization()(x)
+    #x = Dropout(0.3)(x)
+    x = Dense(128, activation = 'relu')(x)
+    #x = BatchNormalization()(x)
+    #x = Dropout(0.3)(x)
+    x = Dense(64, activation = 'relu')(x)
+    #x = BatchNormalization()(x)
+    #x = Dropout(0.3)(x)
+    
+    # Output
+    output = Dense(1, activation = 'relu')(x)
+    
+    # Model
+    model = Model([name, desc, brand, cond, shipping, desc_len, name_len, cat_0, cat_1, cat_2, cat_3, cat_4], output)
+    model.compile(loss = 'mse', optimizer = 'adam')
+    
+    return model
+
+
+def emb_model(cat, name, desc, ship_cond):
+    cat_input = Input(shape = (cat.shape[1],))
+    name_input = Input(shape = (name.shape[1],))
+    #desc_input = Input(shape = (desc.shape[1],))
+    x = Embedding(1025, 64, input_length=8)(cat_input)
+    y = Embedding(100000, 64, input_length=17)(name_input)
+    #z = Embedding(10000, 64, input_length=264)(desc_input)
+    cat_lstm_out = LSTM(32)(x)
+    name_lstm_out = LSTM(32)(y)
+    #desc_lstm_out = LSTM(16)(z)
+    cat_output = Dense(1, activation='sigmoid')(cat_lstm_out)
+    name_output = Dense(1, activation='sigmoid')(name_lstm_out)
+    #desc_output = Dense(1, activation='sigmoid')(desc_lstm_out)
+    easy_input = Input(shape = (ship_cond.shape[1],))
+    #x = concatenate([cat_lstm_out, name_lstm_out, desc_lstm_out, easy_input])
+    x = concatenate([cat_lstm_out, name_lstm_out, easy_input])
+    x = Dense(128, activation = 'relu')(x)
+    x = Dense(64, activation = 'relu')(x)
+    main_output = Dense(1, activation = 'relu')(x)
+    #model = Model(inputs=[cat_input, name_input, desc_input, easy_input], outputs=[main_output, cat_output, name_output, desc_output])
+    model = Model(inputs=[cat_input, name_input, easy_input], outputs=[main_output, cat_output, name_output])
+    #sgd = optimizers.SGD(lr=0.1, decay=1e-6, momentum=0.9, nesterov=True)
+    #rms = optimizers.RMSprop(lr=0.002)
+    model.compile(optimizer='rmsprop', loss=['mse', 'binary_crossentropy', 'binary_crossentropy'], loss_weights=[1., 0.1, 0.1], metrics = ['mae'])
+    #model.compile(optimizer='rmsprop', loss='mse', loss_weights=[1., 0.1, 0.1, 0.1], metrics = ['mae'])
+    #model.compile(optimizer='rmsprop', loss='mse', loss_weights=[1., 0.1, 0.1], metrics = ['mae'])
+    #model = Sequential()
+    #model.add(Embedding(1025, 64, input_length=8))
+    #model.add(Flatten())
+    #model.add(Dense(1, activation = 'relu'))
+    #model.compile(optimizer='rmsprop', loss='mse', metrics=['mae'])
+    return model
+
+def conv_emb_model(cat, name, desc, ship_cond):
+    cat_input = Input(shape = (cat.shape[1],))
+    name_input = Input(shape = (name.shape[1],))
+    desc_input = Input(shape = (desc.shape[1],))
+    x = Embedding(max([max(i) for i in cat]) + 1, 64, input_length=11)(cat_input)
+    y = Embedding(max([max(i) for i in name]) + 1, 128, input_length=17)(name_input)
+    z = Embedding(max([max(i) for i in desc]) + 1, 64, input_length=50)(desc_input)
+    cat_lstm_out = Conv1D(32, 7, activation = 'relu')(x)
+    cat_lstm_out = GlobalMaxPooling1D()(cat_lstm_out)
+    #cat_lstm_out_1 = Conv1D(32, 7, activation = 'relu')(x)
+    #cat_lstm_out_1 = GlobalMaxPooling1D()(cat_lstm_out_1)
+    #cat_lstm_out_2 = Conv1D(32, 3, activation = 'relu')(x)
+    #cat_lstm_out_2 = GlobalMaxPooling1D()(cat_lstm_out_2)
+    name_lstm_out = Conv1D(32, 9, activation = 'relu')(y)
+    name_lstm_out = GlobalMaxPooling1D()(name_lstm_out)
+    #name_lstm_out_1 = Conv1D(32, 9, activation = 'relu')(y)
+    #name_lstm_out_1 = GlobalMaxPooling1D()(name_lstm_out_1)
+    #name_lstm_out_2 = Conv1D(32, 3, activation = 'relu')(y)
+    #name_lstm_out_2 = GlobalMaxPooling1D()(name_lstm_out_2)
+    desc_lstm_out = Conv1D(32, 5, activation = 'relu')(z)
+    desc_lstm_out = GlobalMaxPooling1D()(desc_lstm_out)
+    #desc_lstm_out_1 = Conv1D(32, 5, activation = 'relu')(z)
+    #desc_lstm_out_1 = GlobalMaxPooling1D()(desc_lstm_out_1)
+    #desc_lstm_out_2 = Conv1D(32, 3, activation = 'relu')(z)
+    #desc_lstm_out_2 = GlobalMaxPooling1D()(desc_lstm_out_2)
+    #cat_lstm_out = concatenate([cat_lstm_out_1, cat_lstm_out_2])
+    #name_lstm_out = concatenate([name_lstm_out_1, name_lstm_out_2])
+    #desc_lstm_out = concatenate([desc_lstm_out_1, desc_lstm_out_2])
+    cat_output = Dense(1, activation='sigmoid')(cat_lstm_out)
+    name_output = Dense(1, activation='sigmoid')(name_lstm_out)
+    desc_output = Dense(1, activation='sigmoid')(desc_lstm_out)
+    easy_input = Input(shape = (ship_cond.shape[1],))
+    x = concatenate([cat_lstm_out, name_lstm_out, desc_lstm_out, easy_input])
+    #x = concatenate([cat_lstm_out, desc_lstm_out, easy_input])
+    #x = concatenate([cat_lstm_out, name_lstm_out, easy_input])
+    x = Dense(128, activation = 'relu')(x)
+    x = Dense(64, activation = 'relu')(x)
+    main_output = Dense(1, activation = 'relu')(x)
+    model = Model(inputs=[cat_input, name_input, desc_input, easy_input], outputs=[main_output, cat_output, name_output, desc_output])
+    #model = Model(inputs=[cat_input, desc_input, easy_input], outputs=[main_output, cat_output, desc_output])
+    #model = Model(inputs=[cat_input, name_input, easy_input], outputs=[main_output, cat_output, name_output])
+    #sgd = optimizers.SGD(lr=0.1, decay=1e-6, momentum=0.9, nesterov=True)
+    #rms = optimizers.RMSprop(lr=0.002)
+    model.compile(optimizer='rmsprop', loss=['mse', 'binary_crossentropy', 'binary_crossentropy', 'binary_crossentropy'], loss_weights=[1., 0.01, 0.01, 0.01], metrics = ['mae'])
+    #model.compile(optimizer='rmsprop', loss=['mse', 'binary_crossentropy', 'binary_crossentropy'], loss_weights=[1., 0.1, 0.1], metrics = ['mae'])
+    #model.compile(optimizer='rmsprop', loss=['mse', 'binary_crossentropy', 'binary_crossentropy'], loss_weights=[1., 0.1, 0.1], metrics = ['mae'])
+    #model.compile(optimizer='rmsprop', loss='mse', loss_weights=[1., 0.1, 0.1, 0.1], metrics = ['mae'])
+    #model.compile(optimizer='rmsprop', loss='mse', loss_weights=[1., 0.1, 0.1], metrics = ['mae'])
+    #model = Sequential()
+    #model.add(Embedding(1025, 64, input_length=8))
+    #model.add(Flatten())
+    #model.add(Dense(1, activation = 'relu'))
+    #model.compile(optimizer='rmsprop', loss='mse', metrics=['mae'])
+    return model
+
+def gen_model(name_s, ship_cond_s):
+    name_input = Input(shape = (name_s, ))
+    ship_cond_input = Input(shape = (ship_cond_s, ))
+    x = concatenate([name_input, ship_cond_input])
+    x = Dense(128, activation = 'relu')(x)
+    x = Dense(64, activation = 'relu')(x)
+    main_output = Dense(1, activation = 'relu')(x)
+    model.compile(optimizer='rmsprop', loss='mse', metrics = ['mae'])
+    return model
+
+def lol_model():
+    model = Sequential()
+    model.add(Embedding(10000, 64, input_length=17))
+    model.add(Flatten())
+    model.add(Dense(1, activation = 'relu'))
+    model.compile(optimizer='rmsprop', loss='mse', metrics=['mae'])
+    return model
+
+
+def build_model(shape):
+    model = Sequential()
+    model.add(Dense(shape / 4, activation='relu', input_shape=(shape, )))
+    model.add(Dense(64, activation='relu'))
+    model.add(Dense(1, activation = 'relu'))
+    model.compile(optimizer='rmsprop', loss='mse', metrics=['mae'])
+    return model
+
+#def tokenize(df, col, max_word):
+#    vectorizer = TfidfVectorizer(strip_accents = 'unicode',
+#                             token_pattern = TOKEN_PAT,
+#                             stop_words = STOP_W,
+#                             max_features = max_word,
+#                             smooth_idf = True,
+#                             sublinear_tf = False)                                 
+#    analyzer = vectorizer.build_analyzer()
+#    #tokenizer.fit(df[col])
+#    vectorizer.fit(df[col])
+#    output_corpus = [list(map(lambda x: vectorizer.vocabulary_.get(x, max_word) + 1, analyzer(line))) for line in df[col]]
+#    #return [[tokenizer.vocabulary_[j] for j in k] for k in [i for i in words]]
+#    return output_corpus
+#    #tokenizer = Tokenizer(num_words = max_word)
+#    #tokenizer = Tokenizer(num_words = max_word)
+#    #tokenizer.fit_on_texts(df[col])
+#    #return tokenizer.texts_to_sequences(df[col])
+
+def tokenize(df, col, max_word):
+    tokenizer = Tokenizer(num_words = max_word)
+    tokenizer.fit_on_texts(df[col])
+    return tokenizer.texts_to_sequences(df[col])
+
+def enc_d2v(df, col, min_count = 2, window = 5, size = 100):
+    token_col = df[col].apply(CountVectorizer().build_analyzer())
+    docs = []
+    analyzedDocument = namedtuple('AnalyzedDocument', 'words tags')
+    
+    for i, text in enumerate(token_col):
+        words = text
+        tags = [i]
+        docs.append(analyzedDocument(words, tags))
+    
+    print("Start build_vocab")
+    #d2v = Doc2Vec(docs, min_count=min_count, window=window, size=size, workers = 3, iter = 2, dm = 0)
+    d2v = Doc2Vec(alpha=0.025, min_alpha=0.025, min_count=min_count, window=window, size=size, workers = 3, dm = 0)
+    d2v.build_vocab(docs)
+    for epoch in range(2):
+        print(" Start epoch : " + str(epoch + 1))
+        d2v.train(docs, total_examples=d2v.corpus_count, epochs = d2v.iter)
+        d2v.alpha -= 0.002  # decrease the learning rate
+        d2v.min_alpha = d2v.alpha  # fix the learning rate, no decay
+    
+    vects = np.zeros((df[col].size, d2v.vector_size))
+    
+    for i in range(df[col].size):
+        vects[i] = d2v.docvecs[i]
+    
+    d2v.delete_temporary_training_data()
+    return vects
 
 ## -------------------- Filling NaNs --------------------
 ### fast fill nans
@@ -273,7 +529,8 @@ def get_len(df, col, pat):
 ### Add feature word count for col of df
 def len_feature(df, col, name, pat=TOKEN_PAT):
     new_col = parallelize(get_len, df, col, pat)
-    df[name] = MaxAbsScaler().fit_transform(new_col.to_frame())
+    #df[name] = MaxAbsScaler().fit_transform(new_col.to_frame())
+    df[name] = new_col.to_frame()
 
 ###
 def add_len(df, col, p=1):
@@ -305,7 +562,7 @@ elif SMALL:
     df_train.drop(drop_indices, inplace=True)
     df_test = None
 else:
-    df_train, df_test = train_test_split(df_train, test_size=0.3, random_state=RAND)
+    df_train, df_test = train_test_split(df_train, test_size=0.05, random_state=RAND)
 
 split_index = len(df_train) 
 
@@ -321,7 +578,7 @@ print("  Begin standardization")
 t = time.time()
 
 str_to_nan(whole, 'item_description', 'No description yet')
-whole = whole.applymap(lambda x: x if type(x)!=str else x.lower())
+#whole = whole.applymap(lambda x: x if type(x)!=str else x.lower())
 
 print("  End standardization : " + str(time.time() - t))
 
@@ -339,6 +596,9 @@ if HAS_DESC:
 
 if HAS_CAT:
     csc_m_list.append(has_feature(whole, 'category_name', 'has_category_name'))
+
+len_feature(whole, 'name', 'name_len')
+len_feature(whole, 'item_description', 'desc_len')
 
 print("  End feature creation : " + str(time.time() - t))
 
@@ -438,187 +698,50 @@ csc_train = csc_final.tocsr()[:split_index]
 csc_test = csc_final.tocsr()[split_index:]
 print("End Preprocessing\n")
 
-def emb_model(cat, name, desc, ship_cond):
-    cat_input = Input(shape = (cat.shape[1],))
-    name_input = Input(shape = (name.shape[1],))
-    #desc_input = Input(shape = (desc.shape[1],))
-    x = Embedding(1025, 64, input_length=8)(cat_input)
-    y = Embedding(100000, 64, input_length=17)(name_input)
-    #z = Embedding(10000, 64, input_length=264)(desc_input)
-    cat_lstm_out = LSTM(32)(x)
-    name_lstm_out = LSTM(32)(y)
-    #desc_lstm_out = LSTM(16)(z)
-    cat_output = Dense(1, activation='sigmoid')(cat_lstm_out)
-    name_output = Dense(1, activation='sigmoid')(name_lstm_out)
-    #desc_output = Dense(1, activation='sigmoid')(desc_lstm_out)
-    easy_input = Input(shape = (ship_cond.shape[1],))
-    #x = concatenate([cat_lstm_out, name_lstm_out, desc_lstm_out, easy_input])
-    x = concatenate([cat_lstm_out, name_lstm_out, easy_input])
-    x = Dense(128, activation = 'relu')(x)
-    x = Dense(64, activation = 'relu')(x)
-    main_output = Dense(1, activation = 'relu')(x)
-    #model = Model(inputs=[cat_input, name_input, desc_input, easy_input], outputs=[main_output, cat_output, name_output, desc_output])
-    model = Model(inputs=[cat_input, name_input, easy_input], outputs=[main_output, cat_output, name_output])
-    #sgd = optimizers.SGD(lr=0.1, decay=1e-6, momentum=0.9, nesterov=True)
-    #rms = optimizers.RMSprop(lr=0.002)
-    model.compile(optimizer='rmsprop', loss=['mse', 'binary_crossentropy', 'binary_crossentropy'], loss_weights=[1., 0.1, 0.1], metrics = ['mae'])
-    #model.compile(optimizer='rmsprop', loss='mse', loss_weights=[1., 0.1, 0.1, 0.1], metrics = ['mae'])
-    #model.compile(optimizer='rmsprop', loss='mse', loss_weights=[1., 0.1, 0.1], metrics = ['mae'])
-    #model = Sequential()
-    #model.add(Embedding(1025, 64, input_length=8))
-    #model.add(Flatten())
-    #model.add(Dense(1, activation = 'relu'))
-    #model.compile(optimizer='rmsprop', loss='mse', metrics=['mae'])
-    return model
+print("Begin Deep Learning")
+print("Categorical to Label")
+t = time.time()
 
-def conv_emb_model(cat, name, desc, ship_cond):
-    cat_input = Input(shape = (cat.shape[1],))
-    name_input = Input(shape = (name.shape[1],))
-    desc_input = Input(shape = (desc.shape[1],))
-    x = Embedding(max([max(i) for i in cat]) + 1, 64, input_length=11)(cat_input)
-    y = Embedding(max([max(i) for i in name]) + 1, 128, input_length=17)(name_input)
-    z = Embedding(max([max(i) for i in desc]) + 1, 32, input_length=30)(desc_input)
-    cat_lstm_out = Conv1D(32, 7, activation = 'relu')(x)
-    name_lstm_out = Conv1D(32, 9, activation = 'relu')(y)
-    desc_lstm_out = Conv1D(32, 5, activation = 'relu')(z)
-    cat_lstm_out = GlobalMaxPooling1D()(cat_lstm_out)
-    name_lstm_out = GlobalMaxPooling1D()(name_lstm_out)
-    desc_lstm_out = GlobalMaxPooling1D()(desc_lstm_out)
-    cat_output = Dense(1, activation='sigmoid')(cat_lstm_out)
-    name_output = Dense(1, activation='sigmoid')(name_lstm_out)
-    desc_output = Dense(1, activation='sigmoid')(desc_lstm_out)
-    easy_input = Input(shape = (ship_cond.shape[1],))
-    x = concatenate([cat_lstm_out, name_lstm_out, desc_lstm_out, easy_input])
-    #x = concatenate([cat_lstm_out, desc_lstm_out, easy_input])
-    #x = concatenate([cat_lstm_out, name_lstm_out, easy_input])
-    x = Dense(128, activation = 'relu')(x)
-    x = Dense(64, activation = 'relu')(x)
-    main_output = Dense(1, activation = 'relu')(x)
-    model = Model(inputs=[cat_input, name_input, desc_input, easy_input], outputs=[main_output, cat_output, name_output, desc_output])
-    #model = Model(inputs=[cat_input, desc_input, easy_input], outputs=[main_output, cat_output, desc_output])
-    #model = Model(inputs=[cat_input, name_input, easy_input], outputs=[main_output, cat_output, name_output])
-    #sgd = optimizers.SGD(lr=0.1, decay=1e-6, momentum=0.9, nesterov=True)
-    #rms = optimizers.RMSprop(lr=0.002)
-    model.compile(optimizer='rmsprop', loss=['mse', 'binary_crossentropy', 'binary_crossentropy', 'binary_crossentropy'], loss_weights=[1., 0.1, 0.1, 0.1], metrics = ['mae'])
-    #model.compile(optimizer='rmsprop', loss=['mse', 'binary_crossentropy', 'binary_crossentropy'], loss_weights=[1., 0.1, 0.1], metrics = ['mae'])
-    #model.compile(optimizer='rmsprop', loss=['mse', 'binary_crossentropy', 'binary_crossentropy'], loss_weights=[1., 0.1, 0.1], metrics = ['mae'])
-    #model.compile(optimizer='rmsprop', loss='mse', loss_weights=[1., 0.1, 0.1, 0.1], metrics = ['mae'])
-    #model.compile(optimizer='rmsprop', loss='mse', loss_weights=[1., 0.1, 0.1], metrics = ['mae'])
-    #model = Sequential()
-    #model.add(Embedding(1025, 64, input_length=8))
-    #model.add(Flatten())
-    #model.add(Dense(1, activation = 'relu'))
-    #model.compile(optimizer='rmsprop', loss='mse', metrics=['mae'])
-    return model
+le = LabelEncoder()
+for col in [i for i in whole.columns if 'category_name_' in i or 'brand_name' in i ]:
+    whole[col] = le.fit_transform(whole[col])
 
-from gensim.models.doc2vec import Doc2Vec
-def gen_model(name_s, ship_cond_s):
-    name_input = Input(shape = (name_s, ))
-    ship_cond_input = Input(shape = (ship_cond_s, ))
-    x = concatenate([name_input, ship_cond_input])
-    x = Dense(128, activation = 'relu')(x)
-    x = Dense(64, activation = 'relu')(x)
-    main_output = Dense(1, activation = 'relu')(x)
-    model.compile(optimizer='rmsprop', loss='mse', metrics = ['mae'])
-    return model
+print('End : ' + str(time.time() - t))
 
-def lol_model():
-    model = Sequential()
-    model.add(Embedding(10000, 64, input_length=17))
-    model.add(Flatten())
-    model.add(Dense(1, activation = 'relu'))
-    model.compile(optimizer='rmsprop', loss='mse', metrics=['mae'])
-    return model
+print('Prepare for NN input')
+t = time.time()
 
+whole['name'] = tokenize(whole, 'name', None)
+whole['item_description'] = tokenize(whole, 'item_description', None)
 
-def build_model(shape):
-    model = Sequential()
-    model.add(Dense(shape / 4, activation='relu', input_shape=(shape, )))
-    model.add(Dense(64, activation='relu'))
-    model.add(Dense(1, activation = 'relu'))
-    model.compile(optimizer='rmsprop', loss='mse', metrics=['mae'])
-    return model
+ct_dict = {'desc_len' : 50 ,
+           'num_cond' : whole.item_condition_id.max() + 2,
+           'shipping' : whole.shipping.max() + 2,
+           'num_desc_len' : np.max(whole.desc_len.max()) + 2,
+           'num_name_len' : np.max(whole.name_len.max()) + 2,
+           'num_name' : np.max(whole.name.max()) + 2,
+           'num_desc' : np.max(whole.item_description.max()) + 2 }
 
-#def tokenize(df, col, max_word):
-#    vectorizer = TfidfVectorizer(strip_accents = 'unicode',
-#                             token_pattern = TOKEN_PAT,
-#                             stop_words = STOP_W,
-#                             max_features = max_word,
-#                             smooth_idf = True,
-#                             sublinear_tf = False)                                 
-#    analyzer = vectorizer.build_analyzer()
-#    #tokenizer.fit(df[col])
-#    vectorizer.fit(df[col])
-#    output_corpus = [list(map(lambda x: vectorizer.vocabulary_.get(x, max_word) + 1, analyzer(line))) for line in df[col]]
-#    #return [[tokenizer.vocabulary_[j] for j in k] for k in [i for i in words]]
-#    return output_corpus
-#    #tokenizer = Tokenizer(num_words = max_word)
-#    #tokenizer = Tokenizer(num_words = max_word)
-#    #tokenizer.fit_on_texts(df[col])
-#    #return tokenizer.texts_to_sequences(df[col])
+for col in [i for i in whole.columns if 'category_name_' in i or 'brand_name' in i]:
+    ct_dict.update({col : whole[col].max() + 2 })
 
-def tokenize(df, col, max_word):
-    tokenizer = Tokenizer(num_words = max_word)
-    tokenizer.fit_on_texts(df[col])
-    return tokenizer.texts_to_sequences(df[col])
+X = get_nn_data(whole)
+print('End : ' + str(time.time() - t))
 
-def enc_d2v(df, col, min_count = 2, window = 5, size = 100):
-    token_col = df[col].apply(CountVectorizer().build_analyzer())
-    docs = []
-    analyzedDocument = namedtuple('AnalyzedDocument', 'words tags')
-    
-    for i, text in enumerate(token_col):
-        words = text
-        tags = [i]
-        docs.append(analyzedDocument(words, tags))
-    
-    #d2v = Doc2Vec(docs, min_count=min_count, window=window, size=size, workers = 3, iter = 2, dm = 0)
-    print("Start build_vocab")
-    d2v = Doc2Vec(alpha=0.025, min_alpha=0.025, min_count=min_count, window=window, size=size, workers = 3, dm = 0)
-    d2v.build_vocab(docs)
-    for epoch in range(2):
-        print(" Start epoch : " + str(epoch + 1))
-        d2v.train(docs, total_examples=d2v.corpus_count, epochs = d2v.iter)
-        d2v.alpha -= 0.002  # decrease the learning rate
-        d2v.min_alpha = d2v.alpha  # fix the learning rate, no decay
-    
-    vects = np.zeros((df[col].size, d2v.vector_size))
-    
-    for i in range(df[col].size):
-        vects[i] = d2v.docvecs[i]
-    
-    d2v.delete_temporary_training_data()
-    return vects
+print('Model DL')
+t = time.time()
 
-#print("Begin deep_learning")
-#array_list = [csc_final.toarray()]
-#t = time.time()
-#whole['cat_brand'] = whole['category_name'] + '/' + whole['brand_name']
-#array_list.append(enc_d2v(whole, 'cat_brand', size = 128))
-#print("  End concat brand and cat : " + str(time.time() - t))
-#t = time.time()
-#array_list.append(enc_d2v(whole, 'item_description', size = 512))
-#print("  End item desc : " + str(time.time() - t))
-#t = time.time()
-#array_list.append(enc_d2v(whole, 'name', size = 256))
-#print("  End item desc : " + str(time.time() - t))
+X_train = {k : X[k][:split_index] for k in X.keys()}
+X_val = {k : X[k][split_index:] for k in X.keys()}
 
-#csc_final = np.hstack(array_list)
-#print("-> csc_final shape : " + str(csc_final.shape) + " <-")
-#csc_train = csc_final.tocsr()[:split_index]
-#csc_test = csc_final.tocsr()[split_index:]
-#print("End Preprocessing\n")
+model = good_model()
+history = model.fit(X_train,
+                    whole.price[:split_index],
+                    epochs = 5,
+                    batch_size = 1000,
+                    validation_data = (X_val, whole.price[split_index:]))
 
-#model = build_model(csc_train.shape[1])
-#history = model.fit(csc_train.toarray(), df_train.price, epochs=2, batch_size=100, validation_data=(csc_test.toarray(), df_test.price))
-#loss = history.history['loss']
-#val_loss = history.history['val_loss']
-#mae = history.history['mean_absolute_error']
-#val_mae = history.history['val_mean_absolute_error']
-#print("loss : " + str(loss))
-#print("val_loss : " + str(val_loss))
-#print("mae : " + str(mae))
-#print("val_mae : " + str(val_mae))
+print('End : ' + str(time.time() - t))
 
 whole['cat_brand'] = whole['category_name'] + '/' + whole['brand_name']
 cat_tok = tokenize(whole, 'cat_brand', 10000)
@@ -626,7 +749,7 @@ cat_tok = tokenize(whole, 'cat_brand', 10000)
 cat_tok = pad_sequences(cat_tok, padding = 'post')
 name_tok = tokenize(whole, 'name', 10000)
 name_tok = pad_sequences(name_tok, padding = 'post')
-desc_tok = [i[:30] for i in tokenize(whole, 'item_description', 10000)]
+desc_tok = [i[:50] for i in tokenize(whole, 'item_description', 10000)]
 desc_tok = pad_sequences(desc_tok, padding = 'post')
 
 #model = emb_model(cat_tok, name_tok, desc_tok, csc_train)
@@ -677,7 +800,8 @@ history = model.fit([cat_tok[:split_index], name_tok[:split_index], desc_tok[:sp
 
 if not SUB:
     #df_test['predicted'] = model.predict(csc_test)
-    df_test['predicted'] = model.predict([cat_tok[1037162:], name_tok[1037162:], desc_tok[1037162:], csc_test.toarray()])[0]
+    #df_test['predicted'] = model.predict([cat_tok[1037162:], name_tok[1037162:], desc_tok[1037162:], csc_test.toarray()])[0]
+    df_test['predicted'] = model.predict(X_val)
     #df_test['predicted'] = model.predict([cat_tok[1037162:], name_tok[1037162:], csc_test.toarray()])[0]
     df_test['predicted'] = np.exp(df_test['predicted'])-1
     df_test['predicted'][df_test['predicted'] < 3] = 3
