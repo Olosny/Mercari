@@ -35,7 +35,7 @@ from multiprocessing import cpu_count, Pool
 
 ## keras
 from keras.models import Sequential, Model
-from keras.layers import Embedding, Reshape, Activation, Input, Dense, Flatten, GRU, concatenate, LSTM, Conv1D, GlobalMaxPooling1D, MaxPooling1D, BatchNormalization, Dropout
+from keras.layers import Embedding, Reshape, Activation, Input, Dense, Flatten, GRU, concatenate, LSTM, Conv1D, GlobalMaxPooling1D, MaxPooling1D, BatchNormalization, Dropout, AveragePooling1D
 from keras.layers.merge import Dot
 from keras.utils import np_utils
 from keras.utils.data_utils import get_file
@@ -95,18 +95,16 @@ STEMMER = SnowballStemmer('english', ignore_stopwords = False)
 STOP_W = set(stopwords.words('english'))
 more_stop = set(['i\'d', 'i\'m', 'i\'ll', ';)', '***', '**', ':)', '(:', '(;', ':-)', '//'])
 STOP_W |= more_stop
-
-BUNDLE_RE = "\\b(bundl\w?|joblot|lot)\\b"
-
-
+BUNDLE_RE = "\\b(bundl\w?|joblot|lot)\\b" 
 ###############
 ## Functions ##
 ###############
 
 ## -------------------- Neural Net ----------------------
-def sanitize_text(df, col):
-    chars_del = re.compile(r"[^A-Za-z0-9(),!?@\'\`\"\_\n]")
-    return df[col].apply(lambda x : [re.sub(chars_del, word, '') for word in x if not word in STOP_W])
+def sanitize_text(df, col, pat):
+    #chars_del = re.compile(r"[^A-Za-z0-9\n]")
+    chars_del = re.compile(pat)
+    return df[col].str.lower().str.replace(chars_del, " ").apply(lambda x : ' '.join([word for word in str(x).split(' ') if word not in STOP_W]))
 
 def get_nn_data(df):
     X = {'name': pad_sequences(df.name, padding = 'post'),
@@ -139,19 +137,19 @@ def good_model():
     
     # Embeddings
     emb_name = Embedding(ct_dict['num_name'], 20)(name)
-    emb_desc = Embedding(ct_dict['num_desc'], 50)(desc)
-    emb_brand = Embedding(ct_dict['brand_name'], 10)(brand)
-    emb_cond = Embedding(ct_dict['num_cond'], 5)(cond)
+    emb_desc = Embedding(ct_dict['num_item_desc'], 50)(desc)
+    emb_brand = Embedding(ct_dict['num_brand_name'], 10)(brand)
+    emb_cond = Embedding(ct_dict['num_item_condition'], 5)(cond)
     emb_desc_len = Embedding(ct_dict['num_desc_len'], 5)(desc_len)
     emb_name_len = Embedding(ct_dict['num_name_len'], 5)(name_len)
-    emb_cat_0 = Embedding(ct_dict['category_name_0'], 10)(cat_0)
-    emb_cat_1 = Embedding(ct_dict['category_name_1'], 10)(cat_1)
-    emb_cat_2 = Embedding(ct_dict['category_name_2'], 30)(cat_2)
-    emb_cat_3 = Embedding(ct_dict['category_name_3'], 10)(cat_3)
-    emb_cat_4 = Embedding(ct_dict['category_name_4'], 10)(cat_4)
+    emb_cat_0 = Embedding(ct_dict['num_category_name_0'], 10)(cat_0)
+    emb_cat_1 = Embedding(ct_dict['num_category_name_1'], 10)(cat_1)
+    emb_cat_2 = Embedding(ct_dict['num_category_name_2'], 30)(cat_2)
+    emb_cat_3 = Embedding(ct_dict['num_category_name_3'], 10)(cat_3)
+    emb_cat_4 = Embedding(ct_dict['num_category_name_4'], 10)(cat_4)
     
     # Convnet
-    conv_name = Conv1D(32, 9, activation = 'relu')(emb_name)
+    conv_name = Conv1D(32, 1, activation = 'relu')(emb_name)
     pool_name = GlobalMaxPooling1D()(conv_name)
     conv_desc = Conv1D(32, 5, activation = 'relu')(emb_desc)
     pool_desc = GlobalMaxPooling1D()(conv_desc)
@@ -305,7 +303,8 @@ def lol_model():
 
 def build_model(shape):
     model = Sequential()
-    model.add(Dense(shape / 4, activation='relu', input_shape=(shape, )))
+    #model.add(Dense(shape / 4, activation='relu', input_shape=(shape, )))
+    model.add(Dense(512, activation='relu', input_shape=(2, )))
     model.add(Dense(64, activation='relu'))
     model.add(Dense(1, activation = 'relu'))
     model.compile(optimizer='rmsprop', loss='mse', metrics=['mae'])
@@ -601,6 +600,8 @@ if HAS_DESC:
 if HAS_CAT:
     csc_m_list.append(has_feature(whole, 'category_name', 'has_category_name'))
 
+whole['name'] = parallelize(sanitize_text, whole, 'name', r"[^A-Za-z0-9\n]")
+whole['item_description'] = parallelize(sanitize_text, whole, 'item_description', r"[^A-Za-z0-9\n]")
 len_feature(whole, 'name', 'name_len')
 len_feature(whole, 'item_description', 'desc_len')
 
@@ -718,18 +719,19 @@ t = time.time()
 whole['name'] = tokenize(whole, 'name', None)
 whole['item_description'] = tokenize(whole, 'item_description', None)
 
-ct_dict = {'desc_len' : 50 ,
-           'num_cond' : whole.item_condition_id.max() + 2,
-           'shipping' : whole.shipping.max() + 2,
-           'num_desc_len' : np.max(whole.desc_len.max()) + 2,
-           'num_name_len' : np.max(whole.name_len.max()) + 2,
-           'num_name' : np.max(whole.name.max()) + 2,
-           'num_desc' : np.max(whole.item_description.max()) + 2 }
+ct_dict = {'desc_len' : 50}
+           #'num_cond' : whole.item_condition_id.max() + 2,
+           #'shipping' : whole.shipping.max() + 2,
+           #'num_desc_len' : np.max(whole.desc_len.max()) + 2,
+           #'num_name_len' : np.max(whole.name_len.max()) + 2,
+           #'num_name' : np.max(whole.name.max()) + 2,
+           #'num_desc' : np.max(whole.item_description.max()) + 2 }
 
-for col in [i for i in whole.columns if 'category_name_' in i or 'brand_name' in i]:
-    ct_dict.update({col : whole[col].max() + 2 })
+#for col in [i for i in whole.columns if 'category_name_' in i or 'brand_name' in i]:
+#    ct_dict.update({col : whole[col].max() + 2 })
 
 X = get_nn_data(whole)
+ct_dict.update({'num_' + k : np.max(X[k]) + 1 for k in X.keys()})
 print('End : ' + str(time.time() - t))
 
 print('Model DL')
@@ -741,7 +743,7 @@ X_val = {k : X[k][split_index:] for k in X.keys()}
 model = good_model()
 history = model.fit(X_train,
                     whole.price[:split_index],
-                    epochs = 5,
+                    epochs = 2,
                     batch_size = 1000,
                     validation_data = (X_val, whole.price[split_index:]))
 
@@ -805,12 +807,12 @@ print('End : ' + str(time.time() - t))
 if not SUB:
     #df_test['predicted'] = model.predict(csc_test)
     #df_test['predicted'] = model.predict([cat_tok[1037162:], name_tok[1037162:], desc_tok[1037162:], csc_test.toarray()])[0]
-    df_test['predicted'] = model.predict(X_val)
-    #df_test['predicted'] = model.predict([cat_tok[1037162:], name_tok[1037162:], csc_test.toarray()])[0]
-    df_test['predicted'] = np.exp(df_test['predicted'])-1
-    df_test['predicted'][df_test['predicted'] < 3] = 3
-    df_test['predicted'] = np.log(df_test['predicted']+1)
-    df_test['eval'] = (df_test['predicted'] - df_test['price'])**2
+    df_test['predicted_cnn'] = model.predict(X_val)
+    #df_test['predicted_cnn'] = model.predict([cat_tok[1037162:], name_tok[1037162:], csc_test.toarray()])[0]
+    df_test['predicted_cnn'] = np.exp(df_test['predicted_cnn'])-1
+    df_test['predicted_cnn'][df_test['predicted_cnn'] < 3] = 3
+    df_test['predicted_cnn'] = np.log(df_test['predicted_cnn']+1)
+    df_test['eval'] = (df_test['predicted_cnn'] - df_test['price'])**2
     eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
     print("score: ", eval1)
     print('End : ' + str(datetime.datetime.now().time()))
@@ -821,6 +823,36 @@ else:
     df_sub.to_csv('submission.csv',index=False)
 
 '''
+df_test['predicted_rf'] = np.exp(df_test['predicted_rf'])-1
+df_test['predicted_rf'][df_test['predicted_rf'] < 3] = 3
+df_test['predicted_rf'] = np.log(df_test['predicted_rf']+1)
+df_test['eval'] = (df_test['predicted_rf'] - df_test['price'])**2
+eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
+print("score: ", eval1)
+df_test['predicted_cnn'] = np.exp(df_test['predicted_cnn'])-1
+df_test['predicted_cnn'][df_test['predicted_cnn'] < 3] = 3
+df_test['predicted_cnn'] = np.log(df_test['predicted_cnn']+1)
+df_test['eval'] = (df_test['predicted_cnn'] - df_test['price'])**2
+eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
+print("score: ", eval1)
+df_test['predicted'] = np.exp(df_test['predicted'])-1
+df_test['predicted'][df_test['predicted'] < 3] = 3
+df_test['predicted'] = np.log(df_test['predicted']+1)
+df_test['eval'] = (df_test['predicted'] - df_test['price'])**2
+eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
+print("score: ", eval1)
+df_test['predicted_ri'] = np.exp(df_test['predicted_ri'])-1
+df_test['predicted_ri'][df_test['predicted_ri'] < 3] = 3
+df_test['predicted_ri'] = np.log(df_test['predicted_ri']+1)
+df_test['eval'] = (df_test['predicted_ri'] - df_test['price'])**2
+eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
+print("score: ", eval1)
+df_love['stacked_rf'] = np.exp(df_love['stacked_rf'])-1
+df_love['stacked_rf'][df_love['stacked_rf'] < 3] = 3
+df_love['stacked_rf'] = np.log(df_love['stacked_rf']+1)
+df_love['eval'] = (df_love['stacked_rf'] - df_love['price'])**2
+eval1 = np.sqrt(1 / len(df_love['eval']) * df_love['eval'].sum())
+print("score: ", eval1)
 ################
 ## Regression ##
 ################
