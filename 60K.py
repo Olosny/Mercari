@@ -44,7 +44,7 @@ from keras.preprocessing.sequence import skipgrams, pad_sequences
 from keras import optimizers
 
 ## gensim
-from gensim.models import Doc2Vec
+from gensim.models import Doc2Vec, Word2Vec
 from gensim.models.doc2vec import Doc2Vec
 from collections import namedtuple
     
@@ -59,24 +59,23 @@ SMALL = False
 ## Strat
 STEMMING = False
 HAS_BRAND = False
-HAS_DESC = False
-HAS_CAT = False
+HAS_DESC = True
+HAS_CAT = True
 FILL_BRAND = True
-HAS_BRAND_NOW = False
-IS_BUNDLE = False
-NLP_DESC = False
-NLP_NAME = False
+HAS_BRAND_NOW = True
+IS_BUNDLE = True
+NLP_DESC = True
+NLP_NAME = True
 NLP_BRAND = False
 NLP_CAT_SPLIT = False
 NLP_CAT_UNSPLIT = False
-HOT_BRAND = False
-NAME_LEN = False
-DESC_LEN = False
+HOT_BRAND = True
+NAME_LEN = True
+DESC_LEN = True
 DESC_LEN_POLY = False
-MULTILAB_CAT = False
-SHIPPING = False
-CONDITION = False
-
+MULTILAB_CAT = True
+SHIPPING = True
+CONDITION = True
 
 ## Random state
 RAND = 145               # 'None', int...
@@ -95,7 +94,8 @@ STEMMER = SnowballStemmer('english', ignore_stopwords = False)
 STOP_W = set(stopwords.words('english'))
 more_stop = set(['i\'d', 'i\'m', 'i\'ll', ';)', '***', '**', ':)', '(:', '(;', ':-)', '//'])
 STOP_W |= more_stop
-BUNDLE_RE = "\\b(bundl\w?|joblot|lot)\\b" 
+
+BUNDLE_RE = "\\b(bundl\w?|joblot|lot|2x|3x|4x)\\b"
 ###############
 ## Functions ##
 ###############
@@ -104,7 +104,8 @@ BUNDLE_RE = "\\b(bundl\w?|joblot|lot)\\b"
 def sanitize_text(df, col, pat):
     #chars_del = re.compile(r"[^A-Za-z0-9\n]")
     chars_del = re.compile(pat)
-    return df[col].str.lower().str.replace(chars_del, " ").apply(lambda x : ' '.join([word for word in str(x).split(' ') if word not in STOP_W]))
+    #return df[col].str.lower().str.replace(chars_del, " ").apply(lambda x : ' '.join([word for word in str(x).split(' ') if word not in STOP_W]))
+    return df[col].str.replace(chars_del, " ").apply(lambda x : ' '.join([word for word in str(x).split(' ') if str(word).lower() not in STOP_W]))
 
 def get_nn_data(df):
     X = {'name': pad_sequences(df.name, padding = 'post'),
@@ -113,7 +114,11 @@ def get_nn_data(df):
          'item_condition': np.array(df[['item_condition_id']]),
          'shipping': np.array(df[["shipping"]]),
          'desc_len': np.array(df[["desc_len"]]),
-         'name_len': np.array(df[["name_len"]])}
+         'name_len': np.array(df[["name_len"]]),
+         'has_desc': np.array(df[['has_item_description']]),
+         'has_cat': np.array(df[['has_category_name']]),
+         'has_brand_now': np.array(df[['has_brand_now']]),
+         'is_bundle': np.array(df[['is_bundle']])}
     
     for col in [i for i in whole.columns if 'category_name_' in i]:
         X.update({col : np.array(df[[col]])})
@@ -134,14 +139,18 @@ def good_model():
     cat_2 = Input(shape=[X["category_name_2"].shape[1]], name="category_name_2")
     cat_3 = Input(shape=[X["category_name_3"].shape[1]], name="category_name_3")
     cat_4 = Input(shape=[X["category_name_4"].shape[1]], name="category_name_4")
+    has_desc = Input(shape=[X["has_desc"].shape[1]], name="has_desc")
+    has_cat = Input(shape=[X["has_cat"].shape[1]], name="has_cat")
+    has_brand_now = Input(shape=[X["has_brand_now"].shape[1]], name="has_brand_now")
+    is_bundle = Input(shape=[X["is_bundle"].shape[1]], name="is_bundle")
     
     # Embeddings
     emb_name = Embedding(ct_dict['num_name'], 20)(name)
     emb_desc = Embedding(ct_dict['num_item_desc'], 50)(desc)
     emb_brand = Embedding(ct_dict['num_brand_name'], 10)(brand)
     emb_cond = Embedding(ct_dict['num_item_condition'], 5)(cond)
-    emb_desc_len = Embedding(ct_dict['num_desc_len'], 5)(desc_len)
-    emb_name_len = Embedding(ct_dict['num_name_len'], 5)(name_len)
+    #emb_desc_len = Embedding(ct_dict['num_desc_len'], 5)(desc_len)
+    #emb_name_len = Embedding(ct_dict['num_name_len'], 5)(name_len)
     emb_cat_0 = Embedding(ct_dict['num_category_name_0'], 10)(cat_0)
     emb_cat_1 = Embedding(ct_dict['num_category_name_1'], 10)(cat_1)
     emb_cat_2 = Embedding(ct_dict['num_category_name_2'], 30)(cat_2)
@@ -149,24 +158,34 @@ def good_model():
     emb_cat_4 = Embedding(ct_dict['num_category_name_4'], 10)(cat_4)
     
     # Convnet
-    conv_name = Conv1D(32, 1, activation = 'relu')(emb_name)
+    conv_name = Conv1D(16, 9, activation = 'relu')(emb_name)
     pool_name = GlobalMaxPooling1D()(conv_name)
-    conv_desc = Conv1D(32, 5, activation = 'relu')(emb_desc)
+    conv_desc = Conv1D(16, 5, activation = 'relu')(emb_desc)
     pool_desc = GlobalMaxPooling1D()(conv_desc)
+    #gru_name  = GRU(8)(emb_name)
+    #gru_desc  = GRU(16)(emb_desc)
+    #pool_name = GRU(8)(emb_name)
+    #pool_desc = GRU(16)(emb_desc)
     
     # Concat
     x = concatenate([pool_name,
                      pool_desc,
+                     gru_name,
+                     gru_desc,
                      Flatten()(emb_brand),
                      Flatten()(emb_cond),
                      shipping,
-                     Flatten()(emb_desc_len),
-                     Flatten()(emb_name_len),
+                     name_len,
+                     desc_len,
                      Flatten()(emb_cat_0),
                      Flatten()(emb_cat_1),
                      Flatten()(emb_cat_2),
                      Flatten()(emb_cat_3),
-                     Flatten()(emb_cat_4)])
+                     Flatten()(emb_cat_4),
+                     has_desc,
+                     has_cat,
+                     has_brand_now,
+                     is_bundle])
     #x = BatchNormalization()(x)
     #x = Dropout(0.1)(x)
     
@@ -174,13 +193,13 @@ def good_model():
     x = Dense(512, activation = 'relu')(x)
     #x = BatchNormalization()(x)
     #x = Dropout(0.1)(x)
-    x = Dense(256, activation = 'relu')(x)
+    #x = Dense(256, activation = 'relu')(x)
     #x = BatchNormalization()(x)
     #x = Dropout(0.1)(x)
     x = Dense(128, activation = 'relu')(x)
     #x = BatchNormalization()(x)
     #x = Dropout(0.1)(x)
-    x = Dense(64, activation = 'relu')(x)
+    #x = Dense(64, activation = 'relu')(x)
     #x = BatchNormalization()(x)
     #x = Dropout(0.1)(x)
     
@@ -188,7 +207,7 @@ def good_model():
     output = Dense(1, activation = 'linear')(x)
     
     # Model
-    model = Model([name, desc, brand, cond, shipping, desc_len, name_len, cat_0, cat_1, cat_2, cat_3, cat_4], output)
+    model = Model([name, desc, brand, cond, shipping, desc_len, name_len, cat_0, cat_1, cat_2, cat_3, cat_4, has_cat, has_desc, has_brand_now, is_bundle], output)
     model.compile(loss = 'mse', optimizer = 'adam')
     
     return model
@@ -304,10 +323,10 @@ def lol_model():
 def build_model(shape):
     model = Sequential()
     #model.add(Dense(shape / 4, activation='relu', input_shape=(shape, )))
-    model.add(Dense(512, activation='relu', input_shape=(2, )))
+    model.add(Dense(512, activation='relu', input_shape=(shape, )))
     model.add(Dense(64, activation='relu'))
     model.add(Dense(1, activation = 'relu'))
-    model.compile(optimizer='rmsprop', loss='mse', metrics=['mae'])
+    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
     return model
 
 #def tokenize(df, col, max_word):
@@ -329,7 +348,7 @@ def build_model(shape):
 #    #return tokenizer.texts_to_sequences(df[col])
 
 def tokenize(df, col, max_word):
-    tokenizer = Tokenizer(num_words = max_word)
+    tokenizer = Tokenizer(num_words = max_word, filters = '', lower = False)
     tokenizer.fit_on_texts(df[col])
     return tokenizer.texts_to_sequences(df[col])
 
@@ -360,6 +379,32 @@ def enc_d2v(df, col, min_count = 2, window = 5, size = 100):
     
     d2v.delete_temporary_training_data()
     return vects
+
+def sentence_vect(sentence, dic, wv, size):
+    average_vect = [0 for i in range(size)]
+    
+    for word in sentence:
+        if word in wv.vocab:
+            idf = dic.get(word) if dic is not None else 1
+            v = [idf * value for value in wv[word]]
+            average_vect = map(sum, zip(average_vect,v))
+    
+    if len(sentence) != 0:
+        average_vect = [val/len(sentence) for val in average_vect]
+    
+    return average_vect
+
+def enc_w2v(df, col, idf = True, min_count = 2, window = 5, size = 100):
+    vectorizer = TfidfVectorizer()                                
+     
+    vectorizer.fit(df[col])
+    dic = dict(zip(vectorizer.get_feature_names(), vectorizer.idf_)) if idf else None
+    
+    token_col = df[col].apply(vectorizer.build_analyzer())
+    w2v = Word2Vec(token_col, min_count=min_count,  window=window, size=size, workers=4)
+    
+    sentence_vects = token_col.apply(lambda x: sentence_vect(x, dic, w2v.wv, size))
+    return pd.DataFrame.from_items(zip(sentence_vects.index, sentence_vects.values)).T
 
 ## -------------------- Filling NaNs --------------------
 ### fast fill nans
@@ -393,6 +438,7 @@ def feature_extract(df, col, str_list):
 def fill_from_extr(df, col_to_fill, col_extr, str_list):
     from_col = parallelize(feature_extract, df[col_extr][df[col_to_fill].isnull()].to_frame(), col_extr, str_list)
     df[col_to_fill].fillna(from_col, inplace=True)
+
 
 ## -------------------- Parallelization --------------------
 ### parallelize
@@ -476,6 +522,7 @@ def csc_from_col(df, col, token_pattern=TOKEN_PAT, min_ngram=1, max_ngram=3, max
     df_col = df[col]
     if STEMMING:
         df_col = parallelize(stem, df_col.to_frame(), col, STEMMER)
+    
     my_vectorizer = TfidfVectorizer(strip_accents = 'unicode',
                                     token_pattern = token_pattern,
                                     stop_words = STOP_W,
@@ -487,6 +534,7 @@ def csc_from_col(df, col, token_pattern=TOKEN_PAT, min_ngram=1, max_ngram=3, max
                                     sublinear_tf = idf_log)                                 
     my_doc_term = my_vectorizer.fit_transform(df_col)
     print("    shape : ", my_doc_term.shape)
+    
     print("    End "+col+" NLP : " + str(time.time()-t1))
     return my_doc_term
 
@@ -523,7 +571,7 @@ def str_to_nan(df, col, string):
 
 ### Count words in 1 doc
 def word_count(doc, pat):
-    return len([w for w in CountVectorizer(token_pattern=pat).build_analyzer()(doc)])
+    return len([w for w in CountVectorizer(token_pattern=pat).build_analyzer()(str(doc))])
 
 ### Count words in col of df
 def get_len(df, col, pat):
@@ -532,7 +580,10 @@ def get_len(df, col, pat):
 ### Add feature word count for col of df
 def len_feature(df, col, name, pat=TOKEN_PAT):
     new_col = parallelize(get_len, df, col, pat)
-    #df[name] = MaxAbsScaler().fit_transform(new_col.to_frame())
+    df[name] = MaxAbsScaler().fit_transform(new_col.to_frame())
+
+def len_feature_nonorm(df, col, name, pat=TOKEN_PAT):
+    new_col = parallelize(get_len, df, col, pat)
     df[name] = new_col.to_frame()
 
 ###
@@ -540,7 +591,6 @@ def add_len(df, col, p=1):
     return csc_matrix(df[col].pow(p)).transpose()
 
 ### len_to_dummies()
-
 
 ##########
 ## Main ##
@@ -600,10 +650,10 @@ if HAS_DESC:
 if HAS_CAT:
     csc_m_list.append(has_feature(whole, 'category_name', 'has_category_name'))
 
-whole['name'] = parallelize(sanitize_text, whole, 'name', r"[^A-Za-z0-9\n]")
-whole['item_description'] = parallelize(sanitize_text, whole, 'item_description', r"[^A-Za-z0-9\n]")
 len_feature(whole, 'name', 'name_len')
 len_feature(whole, 'item_description', 'desc_len')
+whole['name'] = parallelize(sanitize_text, whole, 'name', r"[^A-Za-z0-9\n]")
+whole['item_description'] = parallelize(sanitize_text, whole, 'item_description', r"[^A-Za-z0-9\n]")
 
 print("  End feature creation : " + str(time.time() - t))
 
@@ -623,7 +673,7 @@ if FILL_BRAND:
     fill_from_extr(whole, 'brand_name', 'item_description', brands_list)
 
 if HAS_BRAND_NOW:
-    csc_m_list.append(has_feature(whole, 'brand_name', 'has_brand_now')) 
+    csc_m_list.append(has_feature(whole, 'brand_name', 'has_brand_now'))
 
 print("  End extracting brand names : " + str(time.time() - t))
 
@@ -660,12 +710,13 @@ print("  Begin word counts")
 t = time.time()
 
 if NAME_LEN:
-    len_feature(whole, 'name', 'name_len')
+    #len_feature(whole, 'name', 'name_len')
     csc_m_list.append(add_len(whole, 'name_len'))
 
 if DESC_LEN:
-    len_feature(whole, 'item_description', 'item_description_len')
-    csc_m_list.append(add_len(whole, 'item_description_len'))
+    #len_feature(whole, 'item_description', 'item_description_len')
+    #csc_m_list.append(add_len(whole, 'item_description_len'))
+    csc_m_list.append(add_len(whole, 'desc_len'))
 
 if DESC_LEN_POLY:
     csc_m_list.append(add_len(whole, 'item_description_len', p=2))
@@ -694,25 +745,73 @@ print("  End shipping, category and condition processing : " + str(time.time() -
 ## -------------------- Final csc --------------------
 csc_final = hstack(csc_m_list)
 print("-> csc_final shape : " + str(csc_final.shape) + " <-")
-"""
-estimator = Ridge(copy_X = False, solver="sag", fit_intercept=True, random_state=RAND, alpha = 1.5)
-selector = RFE(estimator, None, step=0.1, verbose=2)
-csc_final = selector.fit_transform(csc_final, whole.price)
-"""
 csc_train = csc_final.tocsr()[:split_index]
 csc_test = csc_final.tocsr()[split_index:]
-print("End Preprocessing\n")
 
-print("Begin Deep Learning")
+#estimator = Ridge(copy_X = False, solver="sag", fit_intercept=True, random_state=RAND, alpha = 1.5)
+#selector = RFE(estimator, int(csc_final.shape[1]*0.9), step=0.034, verbose=2)
+#csc_train = selector.fit_transform(csc_train, df_train.price)
+#print("csc_trian shape: " + str(csc_train.shape))
+#csc_test = selector.transform(csc_test)
+#print("csc_test shape: " + str(csc_test.shape))
+
+print("End Preprocessing\n")
+print("Begin Ridge estimating\n")
+t = time.time()
+estimator = Ridge(copy_X = True, solver="sag", fit_intercept=True, random_state=RAND, alpha = 1.5)
+
+print("estimator: ", estimator.__class__.__name__)
+print("params: ", estimator.get_params())
+
+estimator.fit(csc_train, df_train.price)
+df_test['predicted_ri'] = estimator.predict(csc_test)
+df_test['predicted_ri'] = np.exp(df_test['predicted_ri'])-1
+df_test['predicted_ri'][df_test['predicted_ri'] < 3] = 3
+df_test['predicted_ri'] = np.log(df_test['predicted_ri']+1)
+df_test['eval'] = (df_test['predicted_ri'] - df_test['price'])**2
+eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
+print("score: ", eval1)
+
+print('End : ' + str(datetime.datetime.now().time()))
+
+print("Begin w2v for Random Forest")
+t = time.time()
+word2vec_rf = pd.merge(enc_w2v(whole, 'name', size = 20), enc_w2v(whole, 'item_description', size = 10), right_index = True, left_index = True)
+print('End : ' + str(datetime.datetime.now().time()))
+
 print("Categorical to Label")
 t = time.time()
-
 le = LabelEncoder()
 for col in [i for i in whole.columns if 'category_name_' in i or 'brand_name' in i ]:
     whole[col] = le.fit_transform(whole[col])
 
 print('End : ' + str(time.time() - t))
 
+print("Begin Random Forest estimating")
+estimator = RandomForestRegressor(n_estimators=20, n_jobs=N_CORES ,verbose=1)
+
+print("estimator: ", estimator.__class__.__name__)
+print("params: ", estimator.get_params())
+
+estimator.fit(pd.merge(whole.drop(['name', 'item_description', 'category_name', 'brand_name', 'price'], axis = 1)[:split_index],
+                       word2vec_rf[:split_index],
+                       left_index = True,
+                       right_index = True),
+              whole.price[:split_index])
+df_test['predicted_rf'] = estimator.predict(pd.merge(whole.drop(['name', 'item_description', 'category_name', 'brand_name', 'price'], axis = 1)[split_index:],
+                                                     word2vec_rf[split_index:],
+                                                     left_index = True,
+                                                     right_index = True))
+df_test['predicted_rf'] = np.exp(df_test['predicted_rf'])-1
+df_test['predicted_rf'][df_test['predicted_rf'] < 3] = 3
+df_test['predicted_rf'] = np.log(df_test['predicted_rf']+1)
+df_test['eval'] = (df_test['predicted_rf'] - df_test['price'])**2
+eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
+print("score: ", eval1)
+
+print('End : ' + str(datetime.datetime.now().time()))
+
+print("Begin Deep Learning")
 print('Prepare for NN input')
 t = time.time()
 
@@ -744,11 +843,32 @@ model = good_model()
 history = model.fit(X_train,
                     whole.price[:split_index],
                     epochs = 2,
-                    batch_size = 1000,
+                    batch_size = 3000,
                     validation_data = (X_val, whole.price[split_index:]))
 
 print('End : ' + str(time.time() - t))
 
+print('Begin RNN estimating')
+df_test['predicted_cnn'] = model.predict(X_val)
+df_test['predicted_cnn'] = np.exp(df_test['predicted_cnn'])-1
+df_test['predicted_cnn'][df_test['predicted_cnn'] < 3] = 3
+df_test['predicted_cnn'] = np.log(df_test['predicted_cnn']+1)
+df_test['eval'] = (df_test['predicted_cnn'] - df_test['price'])**2
+eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
+print("score: ", eval1)
+print('End : ' + str(datetime.datetime.now().time()))
+
+print('Begin final estimating')
+model = build_model(3)
+model.fit(df_test[['predicted_ri', 'predicted_rf', 'predicted_cnn']], df_test.price, epochs = 3, batch_size = 3000)
+df_test['predicted'] = model.predict(df_test[['predicted_ri', 'predicted_rf', 'predicted_cnn']])
+df_test['predicted'] = np.exp(df_test['predicted'])-1
+df_test['predicted'][df_test['predicted'] < 3] = 3
+df_test['predicted'] = np.log(df_test['predicted']+1)
+df_test['eval'] = (df_test['predicted'] - df_test['price'])**2
+eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
+print("score: ", eval1)
+print('End : ' + str(datetime.datetime.now().time()))
 #whole['cat_brand'] = whole['category_name'] + '/' + whole['brand_name']
 #cat_tok = tokenize(whole, 'cat_brand', 10000)
 ##cat_tok = tokenize(whole, 'category_name', 1025)
@@ -804,23 +924,23 @@ print('End : ' + str(time.time() - t))
 #plt.legend()
 #plt.show()
 
-if not SUB:
-    #df_test['predicted'] = model.predict(csc_test)
-    #df_test['predicted'] = model.predict([cat_tok[1037162:], name_tok[1037162:], desc_tok[1037162:], csc_test.toarray()])[0]
-    df_test['predicted_cnn'] = model.predict(X_val)
-    #df_test['predicted_cnn'] = model.predict([cat_tok[1037162:], name_tok[1037162:], csc_test.toarray()])[0]
-    df_test['predicted_cnn'] = np.exp(df_test['predicted_cnn'])-1
-    df_test['predicted_cnn'][df_test['predicted_cnn'] < 3] = 3
-    df_test['predicted_cnn'] = np.log(df_test['predicted_cnn']+1)
-    df_test['eval'] = (df_test['predicted_cnn'] - df_test['price'])**2
-    eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
-    print("score: ", eval1)
-    print('End : ' + str(datetime.datetime.now().time()))
-else:
-    df_sub = pd.DataFrame({'test_id' : df_test.index - sup_index_train})
-    df_sub['price'] = np.exp(model.predict(csc_test.toarray()))-1
-    df_sub['price'][df_sub['price'] < 3] = 3
-    df_sub.to_csv('submission.csv',index=False)
+#if not SUB:
+#    #df_test['predicted'] = model.predict(csc_test)
+#    #df_test['predicted'] = model.predict([cat_tok[1037162:], name_tok[1037162:], desc_tok[1037162:], csc_test.toarray()])[0]
+#    df_test['predicted_cnn'] = model.predict(X_val)
+#    #df_test['predicted_cnn'] = model.predict([cat_tok[1037162:], name_tok[1037162:], csc_test.toarray()])[0]
+#    df_test['predicted_cnn'] = np.exp(df_test['predicted_cnn'])-1
+#    df_test['predicted_cnn'][df_test['predicted_cnn'] < 3] = 3
+#    df_test['predicted_cnn'] = np.log(df_test['predicted_cnn']+1)
+#    df_test['eval'] = (df_test['predicted_cnn'] - df_test['price'])**2
+#    eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
+#    print("score: ", eval1)
+#    print('End : ' + str(datetime.datetime.now().time()))
+#else:
+#    df_sub = pd.DataFrame({'test_id' : df_test.index - sup_index_train})
+#    df_sub['price'] = np.exp(model.predict(csc_test.toarray()))-1
+#    df_sub['price'][df_sub['price'] < 3] = 3
+#    df_sub.to_csv('submission.csv',index=False)
 
 '''
 df_test['predicted_rf'] = np.exp(df_test['predicted_rf'])-1
@@ -841,10 +961,10 @@ df_test['predicted'] = np.log(df_test['predicted']+1)
 df_test['eval'] = (df_test['predicted'] - df_test['price'])**2
 eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
 print("score: ", eval1)
-df_test['predicted_ri'] = np.exp(df_test['predicted_ri'])-1
-df_test['predicted_ri'][df_test['predicted_ri'] < 3] = 3
-df_test['predicted_ri'] = np.log(df_test['predicted_ri']+1)
-df_test['eval'] = (df_test['predicted_ri'] - df_test['price'])**2
+df_test['predicted_rf'] = np.exp(df_test['predicted_rf'])-1
+df_test['predicted_rf'][df_test['predicted_rf'] < 3] = 3
+df_test['predicted_rf'] = np.log(df_test['predicted_rf']+1)
+df_test['eval'] = (df_test['predicted_rf'] - df_test['price'])**2
 eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
 print("score: ", eval1)
 df_love['stacked_rf'] = np.exp(df_love['stacked_rf'])-1
@@ -871,11 +991,11 @@ if SMALL:
 else:
     estimator.fit(csc_train, df_train.price)
     if not SUB:
-        df_test['predicted'] = estimator.predict(csc_test)
-        df_test['predicted'] = np.exp(df_test['predicted'])-1
-        df_test['predicted'][df_test['predicted'] < 3] = 3
-        df_test['predicted'] = np.log(df_test['predicted']+1)
-        df_test['eval'] = (df_test['predicted'] - df_test['price'])**2
+        df_test['predicted_ri'] = estimator.predict(csc_test)
+        df_test['predicted_ri'] = np.exp(df_test['predicted_ri'])-1
+        df_test['predicted_ri'][df_test['predicted_ri'] < 3] = 3
+        df_test['predicted_ri'] = np.log(df_test['predicted_ri']+1)
+        df_test['eval'] = (df_test['predicted_ri'] - df_test['price'])**2
         eval1 = np.sqrt(1 / len(df_test['eval']) * df_test['eval'].sum())
         print("score: ", eval1)
         print('End : ' + str(datetime.datetime.now().time()))
