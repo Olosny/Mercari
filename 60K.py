@@ -170,8 +170,6 @@ def good_model():
     # Concat
     x = concatenate([pool_name,
                      pool_desc,
-                     gru_name,
-                     gru_desc,
                      Flatten()(emb_brand),
                      Flatten()(emb_cond),
                      shipping,
@@ -208,7 +206,8 @@ def good_model():
     
     # Model
     model = Model([name, desc, brand, cond, shipping, desc_len, name_len, cat_0, cat_1, cat_2, cat_3, cat_4, has_cat, has_desc, has_brand_now, is_bundle], output)
-    model.compile(loss = 'mse', optimizer = 'adam')
+    opti = optimizers.Adam(lr = 0.005, decay = 0.0005)
+    model.compile(loss = 'mse', optimizer = opti)
     
     return model
 
@@ -319,13 +318,12 @@ def lol_model():
     model.compile(optimizer='rmsprop', loss='mse', metrics=['mae'])
     return model
 
-
 def build_model(shape):
     model = Sequential()
     #model.add(Dense(shape / 4, activation='relu', input_shape=(shape, )))
     model.add(Dense(512, activation='relu', input_shape=(shape, )))
     model.add(Dense(64, activation='relu'))
-    model.add(Dense(1, activation = 'relu'))
+    model.add(Dense(1, activation = 'linear'))
     model.compile(optimizer='adam', loss='mse', metrics=['mae'])
     return model
 
@@ -776,7 +774,8 @@ print('End : ' + str(datetime.datetime.now().time()))
 
 print("Begin w2v for Random Forest")
 t = time.time()
-word2vec_rf = pd.merge(enc_w2v(whole, 'name', size = 20), enc_w2v(whole, 'item_description', size = 10), right_index = True, left_index = True)
+#word2vec_rf = pd.merge(enc_w2v(whole, 'name', size = 20), enc_w2v(whole, 'item_description', size = 10), right_index = True, left_index = True)
+word2vec_rf = enc_w2v(whole, 'name', size = 20)
 print('End : ' + str(datetime.datetime.now().time()))
 
 print("Categorical to Label")
@@ -860,7 +859,7 @@ print('End : ' + str(datetime.datetime.now().time()))
 
 print('Begin final estimating')
 model = build_model(3)
-model.fit(df_test[['predicted_ri', 'predicted_rf', 'predicted_cnn']], df_test.price, epochs = 3, batch_size = 3000)
+model.fit(df_test[['predicted_ri', 'predicted_rf', 'predicted_cnn']], df_test.price, epochs = 10, batch_size = 3000)
 df_test['predicted'] = model.predict(df_test[['predicted_ri', 'predicted_rf', 'predicted_cnn']])
 df_test['predicted'] = np.exp(df_test['predicted'])-1
 df_test['predicted'][df_test['predicted'] < 3] = 3
